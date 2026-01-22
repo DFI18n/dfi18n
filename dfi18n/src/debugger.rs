@@ -64,13 +64,13 @@ pub fn update() {
   renderer.clear_color(16, 16, 16, 255);
 
   // Render all text blocks in the lower screen layer
-  for (id, coordinate, text_block) in screen::get_text_blocks(screen::Layer::Lower) {
-    text_block.render(&renderer, &coordinate, screen::Layer::Lower, id);
+  for (id, coordinate, sflag, text_block) in screen::get_text_blocks(screen::Layer::Lower) {
+    text_block.render(&renderer, &coordinate, sflag, screen::Layer::Lower, id);
   }
 
   // Render all text blocks in the upper screen layer
-  for (id, coordinate, text_block) in screen::get_text_blocks(screen::Layer::Upper) {
-    text_block.render(&renderer, &coordinate, screen::Layer::Upper, id);
+  for (id, coordinate, sflag, text_block) in screen::get_text_blocks(screen::Layer::Upper) {
+    text_block.render(&renderer, &coordinate, sflag, screen::Layer::Upper, id);
   }
 
   renderer.present();

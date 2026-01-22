@@ -4,6 +4,7 @@ use std::sync::{OnceLock, RwLock};
 
 use sdl2_sys as sdl;
 
+use crate::types::{SCREENTEXPOS_BOTTOM_OF_TEXT_SFLAG, SCREENTEXPOS_TOP_OF_TEXT_SFLAG};
 use crate::{df, glyph, markup, screen, translation, translator, types};
 
 // TODO: make this configurable
@@ -282,8 +283,8 @@ impl TextBlock {
   }
 
   // Adds the TextBlock to the specified screen layer at the given coordinate, returns its assigned ID
-  pub fn add_to_screen(&self, layer: screen::Layer, coordinate: types::Coordinate) -> u16 {
-    screen::add_text_block_to_screens(layer, coordinate, self.to_owned())
+  pub fn add_to_screen(&self, layer: screen::Layer, coordinate: types::Coordinate, sflag: types::SFlag) -> u16 {
+    screen::add_text_block_to_screens(layer, coordinate, sflag, self.to_owned())
   }
 
   // Render the TextBlock at the specified position using the given renderer, with layer and ID for collision checking
@@ -291,6 +292,7 @@ impl TextBlock {
     &self,
     renderer: &sdl::Renderer<'static>,
     coordinate: &types::Coordinate,
+    sflag: types::SFlag,
     layer: screen::Layer,
     id: u16,
   ) {
@@ -326,12 +328,16 @@ impl TextBlock {
     let mut min_ox = i32::MAX;
     let mut max_w = i32::MIN;
 
+    /* NOTE: changed top/bottom half rendering.
+     *
     // add 1/2 zoomed glyph height for double line height layout
-    let mut py = py;
-    if self.layout.double_line_height {
-      py += (zoom_size.height as f32 / 2.0).round() as i32;
-    }
+    // let mut py = py;
+    // if self.layout.double_line_height {
+    //   py += (zoom_size.height as f32 / 2.0).round() as i32;
+    // }
     let py = py;
+     *
+     */
 
     // for each row in the text block
     for (i, row) in self.rows.iter().enumerate() {
@@ -386,8 +392,11 @@ impl TextBlock {
           let h = (texture_height as f32 * height_scale_factor).round() as i32 - padding_y;
           let rect = sdl::SDL_Rect { x, y, w, h };
 
+          /* NOTE: screen::is_occupied_tile() cause text flicker. */
           // check if the glyph fits within the text block area and does not overlap occupied tiles
-          if ox + w <= columns as i32 * zoom_size.width && !screen::is_occupied_tile(x, x + w, y, y + h, &layer, id) {
+          if ox + w <= columns as i32 * zoom_size.width
+          /*&& !screen::is_occupied_tile(x, x + w, y, y + h, &layer, id) */
+          {
             // render the background color if not black (which means transparent)
             let bg = &fragment.color_pair.background;
             if bg.r != 0 || bg.g != 0 || bg.b != 0 {
@@ -397,7 +406,34 @@ impl TextBlock {
             // render the glyph with the foreground color
             let fg = &fragment.color_pair.foreground;
             texture.set_color_mod(fg.r, fg.g, fg.b);
-            renderer.copy(&texture, None, Some(&rect));
+
+            /* Mimic g_src's top and bottom half glyph rendering */
+            if (sflag & SCREENTEXPOS_TOP_OF_TEXT_SFLAG) != 0 {
+              let src_rect = sdl::SDL_Rect {
+                x: 0,
+                y: 0,
+                w: texture_width,
+                h: texture_height / 2,
+              };
+              let dst_rect = sdl::SDL_Rect {
+                x,
+                y: y + zoom_size.height - h / 2,
+                w,
+                h: h / 2,
+              };
+              renderer.copy(&texture, Some(&src_rect), Some(&dst_rect));
+            } else if (sflag & SCREENTEXPOS_BOTTOM_OF_TEXT_SFLAG) != 0 {
+              let src_rect = sdl::SDL_Rect {
+                x: 0,
+                y: texture_height / 2,
+                w: texture_width,
+                h: texture_height - texture_height / 2,
+              };
+              let dst_rect = sdl::SDL_Rect { x, y, w, h: h - h / 2 };
+              renderer.copy(&texture, Some(&src_rect), Some(&dst_rect));
+            } else {
+              renderer.copy(&texture, None, Some(&rect));
+            }
 
             // render the debug blue box for the glyph only in the debugger window
             if renderer != &df::renderer::get_sdl_info().renderer() {

@@ -14,6 +14,11 @@ pub struct Coordinate {
   pub row: i32,
 }
 
+// g_src: addst_flag(..., sflag)
+pub type SFlag = u32;
+pub const SCREENTEXPOS_TOP_OF_TEXT_SFLAG: SFlag = 8;
+pub const SCREENTEXPOS_BOTTOM_OF_TEXT_SFLAG: SFlag = 16;
+
 impl Coordinate {
   pub fn offset(&self) -> usize {
     let dims = df::gps::get_dimensions();

@@ -37,7 +37,7 @@ fn next_upper_id() -> u16 {
 }
 
 // List of text blocks on a screen layer, indexed by their IDs and coordinates
-type Screen = Vec<(u16, types::Coordinate, text::TextBlock)>;
+type Screen = Vec<(u16, types::Coordinate, types::SFlag, text::TextBlock)>;
 // Tuple of screens representing the upper and lower screens
 type Screens = (Screen, Screen);
 
@@ -64,24 +64,29 @@ pub fn clear_screens() {
 }
 
 // Adds a text block to the specified screen layer at the given coordinate, returns its assigned ID
-pub fn add_text_block_to_screens(layer: Layer, coordinate: types::Coordinate, text_block: text::TextBlock) -> u16 {
+pub fn add_text_block_to_screens(
+  layer: Layer,
+  coordinate: types::Coordinate,
+  sflag: types::SFlag,
+  text_block: text::TextBlock,
+) -> u16 {
   let mut screens = get_screens_mut();
   let (screen, id) = match layer {
     Layer::Lower => (&mut screens.0, next_lower_id()),
     Layer::Upper => (&mut screens.1, next_upper_id()),
   };
-  screen.push((id, coordinate, text_block));
+  screen.push((id, coordinate, sflag, text_block));
   id
 }
 
 // Retrieves all text blocks from the specified screen layer
-pub fn get_text_blocks(layer: Layer) -> Vec<(u16, types::Coordinate, text::TextBlock)> {
+pub fn get_text_blocks(layer: Layer) -> Vec<(u16, types::Coordinate, types::SFlag, text::TextBlock)> {
   let screens = get_screens();
   let screen = match layer {
     Layer::Lower => &screens.0,
     Layer::Upper => &screens.1,
   };
-  screen.iter().map(|(id, coord, tb)| (*id, coord.to_owned(), tb.to_owned())).collect()
+  screen.iter().map(|(id, coord, sflag, tb)| (*id, coord.to_owned(), *sflag, tb.to_owned())).collect()
 }
 
 // Checks if any DFHack occupied tile exists within the specified rectangle

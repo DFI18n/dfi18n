@@ -12,6 +12,17 @@ use crate::types::{ColorPair, DFHackPen};
 use crate::{control, debugger, df, lang, logging, logo, markup, memory, screen, text, translation, translator, types};
 use translation::{TranslationInput, TranslationRequest};
 
+fn render_things() {
+  // log::info!("render_things()");
+  if !control::is_enabled() {
+    return call_render_things();
+  }
+
+  screen::clear_screens();
+
+  call_render_things();
+}
+
 fn addst(gps_ptr: *const ffi::c_void, string_ptr: *const ffi::c_void, just: u8, space: i32) {
   let bt = crate::backtrace();
 
@@ -23,7 +34,7 @@ fn addst(gps_ptr: *const ffi::c_void, string_ptr: *const ffi::c_void, just: u8, 
   logging::log_text(&request, &bt, string_ptr);
   let text_block = text::TextBlock::get(&request);
   let columns = text_block.columns();
-  let id = text_block.add_to_screen(screen::Layer::Lower, request.coordinate());
+  let id = text_block.add_to_screen(screen::Layer::Lower, request.coordinate(), 0);
 
   if !control::is_enabled() {
     return call_addst(gps_ptr, string_ptr, just, space);
@@ -48,8 +59,10 @@ fn addst_flag(gps_ptr: *const ffi::c_void, string_ptr: *const ffi::c_void, just:
   logging::log_text(&request, &bt, string_ptr);
   let text_block = text::TextBlock::get(&request);
   let columns = text_block.columns();
-  let id = text_block.add_to_screen(screen::Layer::Lower, request.coordinate());
+  let id = text_block.add_to_screen(screen::Layer::Lower, request.coordinate(), sflag);
 
+  /* Note: top/bottom half text rendering behavior changed.
+   *
   // do not render bottom half of the text when enabled
   if control::is_enabled() {
     const BOTTOM_OF_TEXT: u32 = 0b00010000;
@@ -61,6 +74,8 @@ fn addst_flag(gps_ptr: *const ffi::c_void, string_ptr: *const ffi::c_void, just:
       return;
     }
   }
+  *
+  */
 
   if !control::is_enabled() {
     return call_addst_flag(gps_ptr, string_ptr, just, space, sflag);
@@ -110,7 +125,7 @@ fn addcoloredst(gps_ptr: *const ffi::c_void, string_ptr: *const ffi::c_void, col
 
   let text_block = markup.text_block();
   let columns = text_block.columns();
-  let id = text_block.add_to_screen(screen::Layer::Lower, request.coordinate());
+  let id = text_block.add_to_screen(screen::Layer::Lower, request.coordinate(), 0);
 
   if !control::is_enabled() {
     return call_addcoloredst(gps_ptr, string_ptr, color_string_ptr);
@@ -137,7 +152,7 @@ fn top_addst(gps_ptr: *const ffi::c_void, string_ptr: *const ffi::c_void, just: 
   logging::log_text(&request, &bt, string_ptr);
   let text_block = text::TextBlock::get(&request);
   let columns = text_block.columns();
-  let id = text_block.add_to_screen(screen::Layer::Upper, request.coordinate());
+  let id = text_block.add_to_screen(screen::Layer::Upper, request.coordinate(), 0);
 
   if !control::is_enabled() {
     return call_top_addst(gps_ptr, string_ptr, just, space);
@@ -175,6 +190,9 @@ fn update_tile(renderer_ptr: *const ffi::c_void, x: i32, y: i32) {
 
       let sdl_renderer = df::renderer::get_sdl_info().renderer();
       sdl_renderer.copy(display_title, None, Some(&rect));
+      log::info!("yes display title");
+    } else {
+      log::info!("no display title");
     }
 
     let texture_blits = df::gps::get_texture_blits();
@@ -218,8 +236,8 @@ fn update_tile(renderer_ptr: *const ffi::c_void, x: i32, y: i32) {
   }
 
   let sdl_renderer = df::renderer::get_sdl_info().renderer();
-  for (id, coordinate, text_block) in screen::get_text_blocks(screen::Layer::Lower) {
-    text_block.render(&sdl_renderer, &coordinate, screen::Layer::Lower, id);
+  for (id, coordinate, sflag, text_block) in screen::get_text_blocks(screen::Layer::Lower) {
+    text_block.render(&sdl_renderer, &coordinate, sflag, screen::Layer::Lower, id);
   }
 }
 
@@ -235,11 +253,14 @@ fn update_all(renderer_ptr: *const ffi::c_void) {
   if control::is_enabled() {
     let display_title = df::gps::get_display_title();
     if *display_title {
-      if let Some(logo_texture) = logo::get_title_logo_by_lang_tag(&lang::current_lang_tag()) {
-        get_display_title_mut().replace(logo_texture);
-        *display_title = false;
-      } else {
-        get_display_title_mut().take();
+      if get_display_title_mut().is_none() {
+        if let Some(logo_texture) = logo::get_title_logo_by_lang_tag(&lang::current_lang_tag()) {
+          get_display_title_mut().replace(logo_texture);
+        } else {
+          get_display_title_mut().take();
+          // Avoid reload title logo after failure
+          *display_title = false;
+        }
       }
     } else {
       get_display_title_mut().take();
@@ -263,8 +284,8 @@ fn update_all(renderer_ptr: *const ffi::c_void) {
 
   if control::is_enabled() {
     let sdl_renderer = df::renderer::get_sdl_info().renderer();
-    for (id, coordinate, text_block) in screen::get_text_blocks(screen::Layer::Upper) {
-      text_block.render(&sdl_renderer, &coordinate, screen::Layer::Upper, id);
+    for (id, coordinate, sflag, text_block) in screen::get_text_blocks(screen::Layer::Upper) {
+      text_block.render(&sdl_renderer, &coordinate, sflag, screen::Layer::Upper, id);
     }
   }
 
@@ -273,7 +294,7 @@ fn update_all(renderer_ptr: *const ffi::c_void) {
     debugger::update();
   }
 
-  screen::clear_screens();
+  // screen::clear_screens(); /* screen cleared in `render_things()` */
   control::toggle_enabled();
   control::do_reset_if_requested();
 }
@@ -349,7 +370,7 @@ fn dfhack_addstr_flag(lua_state: *mut ffi::c_void) {
   // Log the translation request and update the text block
   logging::log_text(&request, &bt, ptr::null());
   let text_block = text::TextBlock::get(&request);
-  let id = text_block.add_to_screen(screen::Layer::Lower, request.coordinate());
+  let id = text_block.add_to_screen(screen::Layer::Lower, request.coordinate(), 0);
 
   if !control::is_enabled() {
     return;
@@ -380,7 +401,7 @@ fn dfhack_paint_string(pen_str: *const ffi::c_void, x: i32, y: i32, string_ptr: 
   logging::log_text(&request, &bt, ptr::null());
   let text_block = text::TextBlock::get(&request);
   let columns = text_block.columns();
-  let id = text_block.add_to_screen(screen::Layer::Lower, request.coordinate());
+  let id = text_block.add_to_screen(screen::Layer::Lower, request.coordinate(), 0);
 
   if !control::is_enabled() {
     return call_dfhack_paint_string(pen_str, x, y, string_ptr, map);
@@ -395,6 +416,7 @@ fn dfhack_paint_string(pen_str: *const ffi::c_void, x: i32, y: i32, string_ptr: 
 }
 
 hook! {
+  fn render_things();
   fn addst(gps_ptr: *const ffi::c_void, string_ptr: *const ffi::c_void, just: u8, space: i32);
   fn addst_flag(gps_ptr: *const ffi::c_void, string_ptr: *const ffi::c_void, just: u8, space: i32, sflag: u32);
   fn addcoloredst(gps_ptr: *const ffi::c_void, string_ptr: *const ffi::c_void, color_string_ptr: *const ffi::c_void);
@@ -407,6 +429,7 @@ hook! {
 }
 
 pub fn attach_all() -> Result<()> {
+  attach_render_things(memory::get_raw_pointer_by_key("render_things")?)?;
   attach_addst(memory::get_raw_pointer_by_key("addst")?)?;
   attach_addst_flag(memory::get_raw_pointer_by_key("addst_flag")?)?;
   attach_addcoloredst(memory::get_raw_pointer_by_key("addcoloredst")?)?;
@@ -455,7 +478,7 @@ fn handle_help_mtb(string_ptr: *const ffi::c_void, bt: &str) -> bool {
 
             // no need to occupy the tiles if not enabled as the original function will do the rendering
             if control::is_enabled() {
-              let id = text_block.add_to_screen(screen::Layer::Upper, request.coordinate());
+              let id = text_block.add_to_screen(screen::Layer::Upper, request.coordinate(), 0);
               screen::mark_occupied(screen::Layer::Upper, request.coordinate(), &text_block, Some(id));
             }
           }
