@@ -394,9 +394,7 @@ impl TextBlock {
 
           /* NOTE: screen::is_occupied_tile() cause text flicker. */
           // check if the glyph fits within the text block area and does not overlap occupied tiles
-          if ox + w <= columns as i32 * zoom_size.width
-          /*&& !screen::is_occupied_tile(x, x + w, y, y + h, &layer, id) */
-          {
+          if ox + w <= columns as i32 * zoom_size.width && !screen::is_occupied_tile(x, x + w, y, y + h, &layer, id) {
             // render the background color if not black (which means transparent)
             let bg = &fragment.color_pair.background;
             if bg.r != 0 || bg.g != 0 || bg.b != 0 {

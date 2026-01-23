@@ -15,28 +15,30 @@ use translation::{TranslationInput, TranslationRequest};
 fn render_things() {
   // log::info!("render_things()");
   if !control::is_enabled() {
+    // ensure to clear the display title when disabled
+    get_display_title_mut().take();
+
     return call_render_things();
   }
 
   screen::clear_screens();
-  /* Check title visibility */
-  if control::is_enabled() {
-    let display_title = df::gps::get_display_title();
-    if *display_title {
-      if let Some(logo_texture) = logo::get_title_logo_by_lang_tag(&lang::current_lang_tag()) {
-        get_display_title_mut().replace(logo_texture);
-      } else {
-        get_display_title_mut().take();
-      }
+
+  // Check title visibility
+  let display_title = df::gps::get_display_title();
+  if *display_title {
+    if let Some(logo_texture) = logo::get_title_logo_by_lang_tag(&lang::current_lang_tag()) {
+      get_display_title_mut().replace(logo_texture);
     } else {
       get_display_title_mut().take();
     }
   } else {
-    // ensure to clear the display title when disabled
     get_display_title_mut().take();
   }
 
   call_render_things();
+
+  // Extract occupancy areas, and clear info encoded in screen cells.
+  screen::move_occupied();
 }
 
 fn addst(gps_ptr: *const ffi::c_void, string_ptr: *const ffi::c_void, just: u8, space: i32) {
@@ -183,11 +185,6 @@ fn top_addst(gps_ptr: *const ffi::c_void, string_ptr: *const ffi::c_void, just: 
 fn update_tile(renderer_ptr: *const ffi::c_void, x: i32, y: i32) {
   // render the MOD logo on the main menu screen
   if x == 0 && y == 0 {
-    // move occupied tiles before rendering
-    if control::is_enabled() {
-      screen::move_occupied();
-    }
-
     // display the title logo if available
     if let Some(display_title) = get_display_title_mut().as_ref() {
       let origin_offset = df::renderer::get_renderer_info().origin_offset();
