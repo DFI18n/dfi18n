@@ -19,6 +19,22 @@ fn render_things() {
   }
 
   screen::clear_screens();
+  /* Check title visibility */
+  if control::is_enabled() {
+    let display_title = df::gps::get_display_title();
+    if *display_title {
+      if let Some(logo_texture) = logo::get_title_logo_by_lang_tag(&lang::current_lang_tag()) {
+        get_display_title_mut().replace(logo_texture);
+      } else {
+        get_display_title_mut().take();
+      }
+    } else {
+      get_display_title_mut().take();
+    }
+  } else {
+    // ensure to clear the display title when disabled
+    get_display_title_mut().take();
+  }
 
   call_render_things();
 }
@@ -190,9 +206,6 @@ fn update_tile(renderer_ptr: *const ffi::c_void, x: i32, y: i32) {
 
       let sdl_renderer = df::renderer::get_sdl_info().renderer();
       sdl_renderer.copy(display_title, None, Some(&rect));
-      log::info!("yes display title");
-    } else {
-      log::info!("no display title");
     }
 
     let texture_blits = df::gps::get_texture_blits();
@@ -250,24 +263,14 @@ fn get_display_title_mut() -> MutexGuard<'static, Option<sdl::Texture<'static>>>
 }
 
 fn update_all(renderer_ptr: *const ffi::c_void) {
-  if control::is_enabled() {
-    let display_title = df::gps::get_display_title();
-    if *display_title {
-      if get_display_title_mut().is_none() {
-        if let Some(logo_texture) = logo::get_title_logo_by_lang_tag(&lang::current_lang_tag()) {
-          get_display_title_mut().replace(logo_texture);
-        } else {
-          get_display_title_mut().take();
-          // Avoid reload title logo after failure
-          *display_title = false;
-        }
-      }
-    } else {
-      get_display_title_mut().take();
-    }
-  } else {
-    // ensure to clear the display title when disabled
-    get_display_title_mut().take();
+  /* NOTE: We need to save display_title,
+   * it may be changed, after inspect it from `render_things()`,
+   * yet another thread issue.
+   * Better to find out which func modify display_title.
+   */
+  let save_display_title = *df::gps::get_display_title();
+  if control::is_enabled() && get_display_title_mut().is_some() {
+    *df::gps::get_display_title() = false;
   }
 
   let mut dimensions = LAST_DIMENSIONS.get_or_init(|| RwLock::new(types::Dimensions::default())).write().unwrap();
@@ -281,6 +284,10 @@ fn update_all(renderer_ptr: *const ffi::c_void) {
   }
 
   call_update_all(renderer_ptr);
+
+  if control::is_enabled() && get_display_title_mut().is_some() {
+    *df::gps::get_display_title() = save_display_title;
+  }
 
   if control::is_enabled() {
     let sdl_renderer = df::renderer::get_sdl_info().renderer();
