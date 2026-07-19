@@ -19,5 +19,6 @@
 
 # Project
 target
+.worktrees/
 mod/dfi18n/libs/*.dll
 mod/dfi18n/libs/*.so
