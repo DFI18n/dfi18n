@@ -1,0 +1,50 @@
+base = "plain_needs"
+
+[[rulesets]]
+[rulesets.rules]
+"Overall, {lower_subject} is untroubled by unmet needs." = "总体而言，{lower_subject}没有受到未满足需求的困扰。"
+"{subject} is unfettered {reason}." = "{subject}没有因为{reason}而感到受束缚。"
+"{subject} is level-headed {reason}." = "{subject}没有因为{reason}而失去冷静。"
+"{subject} is untroubled {reason}." = "{subject}没有因为{reason}而感到困扰。"
+"{subject} is not distracted {reason}." = "{subject}没有因为{reason}而分心。"
+"{subject} is unfocused {reason}." = "{subject}因为{reason}而有些心不在焉。"
+"{subject} is distracted {reason}." = "{subject}因为{reason}而难以专注。"
+"{subject} is badly distracted {reason}." = "{subject}因为{reason}而严重分心。"
+
+[[rulesets]]
+name = "subject"
+[rulesets.rules]
+"He" = "他"
+"She" = "她"
+
+[[rulesets]]
+name = "lower_subject"
+[rulesets.rules]
+"he" = "他"
+"she" = "她"
+
+[[rulesets]]
+name = "reason"
+[rulesets.rules]
+"after being away from people" = "远离人群"
+"after being unoccupied" = "无所事事"
+"after leading an unexciting life" = "生活平淡无奇"
+"after being unable to acquire something" = "无法获得某些东西"
+"after being kept from alcohol" = "没有酒喝"
+"after a lack of decent meals" = "缺少像样的饭菜"
+"after being unable to fight" = "无法战斗"
+"after a lack of trouble-making" = "没能制造麻烦"
+"after being unable to argue" = "无法与人争论"
+"after being unable to be extravagant" = "无法奢侈挥霍"
+"after not learning anything" = "没有学到任何东西"
+"after being unable to help anybody" = "无法帮助任何人"
+"after a lack of abstract thinking" = "缺少抽象思考"
+"after being unable to make merry" = "无法尽情娱乐"
+"after being unable to admire art" = "无法欣赏艺术"
+"after being unable to practice a craft" = "无法练习工艺"
+"after being away from family" = "远离家人"
+"after being away from friends" = "远离朋友"
+"after being unable to practice a martial art" = "无法练习武术"
+"after being unable to practice a skill" = "无法练习技能"
+"after being unable to take it easy" = "无法放松休息"
+"after being unable to pray to Racon" = "无法向拉孔祈祷"

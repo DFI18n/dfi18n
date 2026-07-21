@@ -1,0 +1,9 @@
+base = "day"
+
+[[rulesets]]
+name = "season"
+[rulesets.rules]
+"spring" = "春天"
+"summer" = "夏天"
+"autumn" = "秋天"
+"winter" = "冬天"

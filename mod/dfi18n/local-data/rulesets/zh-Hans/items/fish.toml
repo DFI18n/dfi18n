@@ -1,0 +1,6 @@
+base = "items::fish"
+
+[[rulesets]]
+name = "main"
+[rulesets.rules]
+"fish" = "鱼类"

@@ -1,0 +1,6 @@
+base = "menu"
+
+[[rulesets]]
+name = "main"
+[rulesets.rules]
+"stocks" = "库存"

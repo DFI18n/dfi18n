@@ -1,0 +1,5 @@
+base = "materials::state"
+
+[[rulesets]]
+[rulesets.rules]
+"flux stone layer" = "熔剂石层"

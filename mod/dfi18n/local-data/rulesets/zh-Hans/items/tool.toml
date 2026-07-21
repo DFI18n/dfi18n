@@ -1,0 +1,47 @@
+base = "items::tool"
+
+[[rulesets]]
+[rulesets.rules]
+"{^0}{main}" = "{^0}{main}"
+
+[[rulesets]]
+name = "^0"
+optional = true
+[rulesets.rules]
+"{::materials::adjective} " = "{::materials::adjective}"
+
+[[rulesets]]
+name = "main"
+[rulesets.rules]
+"cauldron" = "大锅"
+"cauldrons" = "大锅"
+"ladle" = "长柄勺"
+"ladles" = "长柄勺"
+"bowl" = "碗"
+"bowls" = "碗"
+"mortar" = "研钵"
+"mortars" = "研钵"
+"pestle" = "研杵"
+"pestles" = "研杵"
+"carving knife" = "切肉刀"
+"carving knives" = "切肉刀"
+"boning knife" = "剔骨刀"
+"boning knives" = "剔骨刀"
+"slicing knife" = "切片刀"
+"slicing knives" = "切片刀"
+"meat cleaver" = "砍肉刀"
+"meat cleavers" = "砍肉刀"
+"carving fork" = "切肉叉"
+"carving forks" = "切肉叉"
+"honeycomb" = "蜂巢"
+"honeycombs" = "蜂巢"
+"pouch" = "小袋"
+"pouches" = "小袋"
+"scroll" = "卷轴"
+"scrolls" = "卷轴"
+"quire" = "纸帖"
+"quires" = "纸帖"
+"helve" = "斧柄"
+"helves" = "斧柄"
+"axe" = "斧"
+"axes" = "斧"

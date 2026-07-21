@@ -1,0 +1,6 @@
+base = "items::meat"
+
+[[rulesets]]
+name = "main"
+[rulesets.rules]
+"meat" = "肉类"

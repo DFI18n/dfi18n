@@ -1,0 +1,8 @@
+base = "items::food"
+
+[[rulesets]]
+[rulesets.rules]
+"food" = "食物"
+"biscuits" = "饼干"
+"stew" = "炖菜"
+"roast" = "烤肉"
