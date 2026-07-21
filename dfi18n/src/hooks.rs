@@ -372,38 +372,33 @@ fn render_things() {
 
   // move occupied tiles before rendering
   if control::is_enabled() {
-    for block in visual_block::finish_frame() {
-      let origin = block.origin();
+    for sentence in visual_block::finish_frame().into_iter().flat_map(visual_block::VisualTextBlock::into_sentences) {
+      let origin = sentence.origin();
       let request = TranslationRequest::new(TranslationInput::visual_text_block {
-        content: block.original.clone(),
+        content: sentence.original.clone(),
         coordinate: origin,
-        color_pair: block.color_pair(),
+        color_pair: sentence.color_pair(),
       });
-      if block.is_sentence() {
-        visual_block::record_sentence(&block.original, &request.view_screen());
+      if sentence.is_complete() {
+        visual_block::record_sentence(&sentence.original, &request.view_screen());
       }
       if let Some(response) = translator::translate(&request) {
         let text_block =
-          text::TextBlock::from_visual_translation(response.translated, block.color_pair(), block.columns());
+          text::TextBlock::from_visual_translation(response.translated, sentence.color_pair(), sentence.columns());
         let id = text_block.add_to_screen(screen::Layer::Lower, origin);
-        for rect in block.clear_rects() {
-          screen::mark_source_region(
-            screen::Layer::Lower,
-            types::Coordinate {
-              column: rect.x,
-              row: rect.y,
-            },
-            rect.width,
-            rect.height,
-            id,
-          );
-        }
+        screen::mark_source_region(
+          screen::Layer::Lower,
+          origin,
+          sentence.source_rect.width,
+          sentence.source_rect.height,
+          id,
+        );
       } else {
         // Preserve develop's original behavior when a reconstructed block has no
         // translation: translate each addst fragment independently at its source
         // coordinate. This keeps existing dictionary entries such as
         // "Temperate" and "Grassland" useful without weakening block matching.
-        for fragment in &block.fragments {
+        for fragment in &sentence.fragments {
           let request = TranslationRequest::new(TranslationInput::visual_text_block {
             content: fragment.text.clone(),
             coordinate: fragment.coordinate,

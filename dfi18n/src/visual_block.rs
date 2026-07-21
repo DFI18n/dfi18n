@@ -46,21 +46,17 @@ pub struct VisualTextBlock {
   pub original: String,
   pub source_rect: Rect,
   pub fragments: Vec<Fragment>,
-  is_sentence: bool,
+  rows: Vec<VisualRow>,
 }
 
 impl VisualTextBlock {
   fn new(row: VisualRow) -> Self {
     Self {
-      original: row.text,
+      original: row.text.clone(),
       source_rect: row.source_rect,
-      fragments: row.fragments,
-      is_sentence: false,
+      fragments: row.fragments.clone(),
+      rows: vec![row],
     }
-  }
-
-  fn last(&self) -> &Fragment {
-    self.fragments.last().unwrap()
   }
 
   fn append_row(&mut self, row: VisualRow) {
@@ -69,7 +65,8 @@ impl VisualTextBlock {
     }
     self.original.push_str(&row.text);
     self.extend_rect(row.source_rect);
-    self.fragments.extend(row.fragments);
+    self.fragments.extend(row.fragments.iter().cloned());
+    self.rows.push(row);
   }
 
   fn extend_rect(&mut self, rect: Rect) {
@@ -79,6 +76,63 @@ impl VisualTextBlock {
     self.source_rect.y = self.source_rect.y.min(rect.y);
     self.source_rect.width = right - self.source_rect.x;
     self.source_rect.height = bottom - self.source_rect.y;
+  }
+
+  pub fn into_sentences(self) -> Vec<VisualSentence> {
+    let mut sentences = Vec::new();
+    let mut pending = Vec::new();
+    for row in self.rows {
+      let complete = ends_complete_sentence(&row.text);
+      pending.push(row);
+      if complete {
+        sentences.push(VisualSentence::from_rows(std::mem::take(&mut pending), true));
+      }
+    }
+    if !pending.is_empty() {
+      // No confident punctuation boundary means the remaining visual region is
+      // deliberately kept as one large sentence instead of being discarded.
+      sentences.push(VisualSentence::from_rows(pending, false));
+    }
+    sentences
+  }
+}
+
+#[derive(Debug, Clone)]
+struct VisualRow {
+  text: String,
+  source_rect: Rect,
+  fragments: Vec<Fragment>,
+}
+
+#[derive(Debug, Clone)]
+pub struct VisualSentence {
+  pub original: String,
+  pub source_rect: Rect,
+  pub fragments: Vec<Fragment>,
+  complete: bool,
+}
+
+impl VisualSentence {
+  fn from_rows(rows: Vec<VisualRow>, complete: bool) -> Self {
+    let first = rows.first().expect("a visual sentence needs at least one row");
+    let mut original = String::new();
+    let mut source_rect = first.source_rect;
+    let mut fragments = Vec::new();
+    for row in rows {
+      if !original.is_empty() && !original.ends_with(char::is_whitespace) && !row.text.starts_with(char::is_whitespace)
+      {
+        original.push(' ');
+      }
+      original.push_str(&row.text);
+      source_rect = union_rect(source_rect, row.source_rect);
+      fragments.extend(row.fragments);
+    }
+    Self {
+      original,
+      source_rect,
+      fragments,
+      complete,
+    }
   }
 
   pub fn origin(&self) -> Coordinate {
@@ -96,32 +150,22 @@ impl VisualTextBlock {
     self.fragments.first().map(|fragment| fragment.color_pair).unwrap_or_default()
   }
 
-  pub fn is_sentence(&self) -> bool {
-    self.is_sentence
-  }
-
-  pub fn clear_rects(&self) -> Vec<Rect> {
-    let mut rects: Vec<Rect> = Vec::new();
-    for fragment in &self.fragments {
-      let rect = fragment.rect();
-      if let Some(last) = rects.last_mut()
-        && last.y == rect.y
-        && rect.x <= last.x + last.width + 1
-      {
-        last.width = (last.x + last.width).max(rect.x + rect.width) - last.x;
-      } else {
-        rects.push(rect);
-      }
-    }
-    rects
+  pub fn is_complete(&self) -> bool {
+    self.complete
   }
 }
 
-#[derive(Debug)]
-struct VisualRow {
-  text: String,
-  source_rect: Rect,
-  fragments: Vec<Fragment>,
+fn union_rect(left: Rect, right: Rect) -> Rect {
+  let x = left.x.min(right.x);
+  let y = left.y.min(right.y);
+  let far_right = (left.x + left.width).max(right.x + right.width);
+  let bottom = (left.y + left.height).max(right.y + right.height);
+  Rect {
+    x,
+    y,
+    width: far_right - x,
+    height: bottom - y,
+  }
 }
 
 impl VisualRow {
@@ -149,11 +193,8 @@ impl VisualRow {
 }
 
 fn ends_complete_sentence(text: &str) -> bool {
-  text.trim_end().ends_with(['.', '!', '?'])
-}
-
-fn begins_with_lowercase_text(text: &str) -> bool {
-  text.chars().find(|character| character.is_alphabetic()).is_some_and(char::is_lowercase)
+  let text = text.trim_end();
+  !text.ends_with("...") && text.ends_with(['.', '!', '?'])
 }
 
 #[derive(Debug, Default)]
@@ -186,39 +227,18 @@ impl Collector {
     let mut current: Option<VisualTextBlock> = None;
     for row in rows {
       let Some(block) = current.as_mut() else {
-        let complete = ends_complete_sentence(&row.text);
         current = Some(VisualTextBlock::new(row));
-        if complete {
-          let mut block = current.take().unwrap();
-          block.is_sentence = true;
-          blocks.push(block);
-        }
         continue;
       };
-      let last = block.last();
-      let first = row.fragments.first().unwrap();
-      let wrapped = first.coordinate.row == last.coordinate.row + 1
-        && (first.coordinate.column < last.coordinate.column
-          || (first.coordinate.column == last.coordinate.column
-            && (block.original.ends_with(char::is_whitespace)
-              || (!ends_complete_sentence(&last.text) && begins_with_lowercase_text(&row.text)))));
-      if wrapped {
-        let complete = ends_complete_sentence(&row.text);
+      let previous = block.rows.last().unwrap();
+      let vertically_adjacent = row.source_rect.y == previous.source_rect.y + previous.source_rect.height;
+      let horizontally_related = row.source_rect.x <= previous.source_rect.x + previous.source_rect.width
+        && previous.source_rect.x <= row.source_rect.x + row.source_rect.width;
+      if vertically_adjacent && horizontally_related {
         block.append_row(row);
-        if complete {
-          let mut block = current.take().unwrap();
-          block.is_sentence = true;
-          blocks.push(block);
-        }
       } else {
         blocks.push(current.take().unwrap());
-        let complete = ends_complete_sentence(&row.text);
         current = Some(VisualTextBlock::new(row));
-        if complete {
-          let mut block = current.take().unwrap();
-          block.is_sentence = true;
-          blocks.push(block);
-        }
       }
     }
     blocks.extend(current);
@@ -343,8 +363,6 @@ mod tests {
 
     let blocks = collector.finish();
     assert_eq!(blocks.len(), 1);
-    assert_eq!(blocks[0].origin(), Coordinate { column: 10, row: 10 });
-    assert_eq!(blocks[0].columns(), 20);
     assert_eq!(
       blocks[0].source_rect,
       Rect {
@@ -357,28 +375,20 @@ mod tests {
   }
 
   #[test]
-  fn keeps_precise_per_row_clear_rectangles() {
+  fn gives_a_multiline_sentence_one_bounding_rectangle() {
     let mut collector = Collector::default();
     collector.push(fragment(20, 10, "First line"));
     collector.push(fragment(10, 11, "second line"));
 
-    let blocks = collector.finish();
+    let sentence = collector.finish().pop().unwrap().into_sentences().pop().unwrap();
     assert_eq!(
-      blocks[0].clear_rects(),
-      vec![
-        Rect {
-          x: 20,
-          y: 10,
-          width: 10,
-          height: 1,
-        },
-        Rect {
-          x: 10,
-          y: 11,
-          width: 11,
-          height: 1,
-        },
-      ]
+      sentence.source_rect,
+      Rect {
+        x: 10,
+        y: 10,
+        width: 20,
+        height: 2,
+      }
     );
   }
 
@@ -390,8 +400,10 @@ mod tests {
 
     let blocks = collector.finish();
     assert_eq!(blocks.len(), 1);
-    assert_eq!(blocks[0].original, "First. Still here!");
-    assert!(blocks[0].is_sentence());
+    let sentences = blocks.into_iter().next().unwrap().into_sentences();
+    assert_eq!(sentences.len(), 1);
+    assert_eq!(sentences[0].original, "First. Still here!");
+    assert!(sentences[0].is_complete());
   }
 
   #[test]
@@ -404,8 +416,10 @@ mod tests {
 
     let blocks = collector.finish();
     assert_eq!(blocks.len(), 1);
-    assert_eq!(blocks[0].original, "Ordinary text. Emphasized ending!");
-    assert!(blocks[0].is_sentence());
+    let sentences = blocks.into_iter().next().unwrap().into_sentences();
+    assert_eq!(sentences.len(), 1);
+    assert_eq!(sentences[0].original, "Ordinary text. Emphasized ending!");
+    assert!(sentences[0].is_complete());
   }
 
   #[test]
@@ -415,10 +429,13 @@ mod tests {
     collector.push(fragment(2, 4, "Second sentence."));
 
     let blocks = collector.finish();
-    assert_eq!(blocks.len(), 2);
-    assert_eq!(blocks[0].original, "First sentence.");
-    assert_eq!(blocks[1].original, "Second sentence.");
-    assert!(blocks.iter().all(VisualTextBlock::is_sentence));
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].original, "First sentence. Second sentence.");
+    let sentences = blocks.into_iter().next().unwrap().into_sentences();
+    assert_eq!(sentences.len(), 2);
+    assert_eq!(sentences[0].original, "First sentence.");
+    assert_eq!(sentences[1].original, "Second sentence.");
+    assert!(sentences.iter().all(VisualSentence::is_complete));
   }
 
   #[test]
@@ -429,8 +446,10 @@ mod tests {
 
     let blocks = collector.finish();
     assert_eq!(blocks.len(), 1);
-    assert_eq!(blocks[0].original, "This sentence wraps onto another row.");
-    assert!(blocks[0].is_sentence());
+    let sentences = blocks.into_iter().next().unwrap().into_sentences();
+    assert_eq!(sentences.len(), 1);
+    assert_eq!(sentences[0].original, "This sentence wraps onto another row.");
+    assert!(sentences[0].is_complete());
   }
 
   #[test]
@@ -440,7 +459,33 @@ mod tests {
 
     let blocks = collector.finish();
     assert_eq!(blocks.len(), 1);
-    assert!(!blocks[0].is_sentence());
+    let sentences = blocks.into_iter().next().unwrap().into_sentences();
+    assert_eq!(sentences.len(), 1);
+    assert_eq!(sentences[0].original, "Health");
+    assert!(!sentences[0].is_complete());
+  }
+
+  #[test]
+  fn treats_an_ellipsis_as_a_visual_box_fallback_not_a_complete_sentence() {
+    let mut collector = Collector::default();
+    collector.push(fragment(2, 3, "Loading..."));
+
+    let sentence = collector.finish().pop().unwrap().into_sentences().pop().unwrap();
+    assert_eq!(sentence.original, "Loading...");
+    assert!(!sentence.is_complete());
+  }
+
+  #[test]
+  fn keeps_multiple_semantic_sentences_together_when_their_x_axis_is_contiguous() {
+    let mut collector = Collector::default();
+    collector.push(fragment(2, 3, "She is calm. She has"));
+    collector.push(fragment(2, 4, "good spatial sense."));
+
+    let blocks = collector.finish();
+    assert_eq!(blocks.len(), 1);
+    let sentences = blocks.into_iter().next().unwrap().into_sentences();
+    assert_eq!(sentences.len(), 1);
+    assert_eq!(sentences[0].original, "She is calm. She has good spatial sense.");
   }
 
   #[test]
