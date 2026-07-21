@@ -38,6 +38,7 @@ pub fn log_text(request: &translation::TranslationRequest, backtrace: &str, ptr:
         translation::TranslationContext::addcoloredst { .. } => "addcoloredst",
         translation::TranslationContext::top_addst { .. } => "top_addst",
         translation::TranslationContext::markup_text_box { .. } => "mtb_process_string_to_lines",
+        translation::TranslationContext::visual_text_block { .. } => "visual_text_block",
         translation::TranslationContext::dfhack { .. } => "dfhack",
       };
       let mut lines = vec![format!("========== {key}"), format!("[{function}] {backtrace}")];

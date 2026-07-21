@@ -25,6 +25,11 @@ pub enum TranslationInput {
     address: usize,
     markup: String,
   },
+  visual_text_block {
+    content: String,
+    coordinate: types::Coordinate,
+    color_pair: types::ColorPair,
+  },
   dfhack {
     content: String,
     coordinate: types::Coordinate,
@@ -42,6 +47,7 @@ impl TranslationInput {
       TranslationInput::addcoloredst { .. } => "addcoloredst",
       TranslationInput::top_addst { .. } => "top_addst",
       TranslationInput::markup_text_box { .. } => "markup_text_box",
+      TranslationInput::visual_text_block { .. } => "visual_text_block",
       TranslationInput::dfhack { .. } => "dfhack",
     }
   }
@@ -53,6 +59,7 @@ impl TranslationInput {
       | TranslationInput::addst_flag { content, .. }
       | TranslationInput::dfhack { content, .. } => content,
       TranslationInput::addcoloredst { markup } | TranslationInput::markup_text_box { markup, .. } => markup,
+      TranslationInput::visual_text_block { content, .. } => content,
       TranslationInput::top_addst { top_content } => top_content,
     }
   }
@@ -68,6 +75,7 @@ impl TranslationInput {
       TranslationInput::addst { .. } | TranslationInput::addst_flag { .. } => Some(df::gps::get_color_pair(false)),
       TranslationInput::top_addst { .. } => Some(df::gps::get_color_pair(true)),
       TranslationInput::addcoloredst { .. } | TranslationInput::markup_text_box { .. } => None,
+      TranslationInput::visual_text_block { color_pair, .. } => Some(color_pair.to_owned()),
       TranslationInput::dfhack { color_pair, .. } => Some(color_pair.to_owned()),
     }
   }
@@ -129,6 +137,12 @@ pub enum TranslationContext {
     viewscreen: String,
     coordinate: types::Coordinate,
   },
+  visual_text_block {
+    content: String,
+    viewscreen: String,
+    coordinate: types::Coordinate,
+    color_pair: types::ColorPair,
+  },
   dfhack {
     content: String,
     viewscreen: String,
@@ -146,6 +160,7 @@ impl TranslationContext {
       | TranslationContext::addst_flag { content, .. }
       | TranslationContext::dfhack { content, .. } => content,
       TranslationContext::addcoloredst { markup, .. } | TranslationContext::markup_text_box { markup, .. } => markup,
+      TranslationContext::visual_text_block { content, .. } => content,
       TranslationContext::top_addst { top_content, .. } => top_content,
     }
   }
@@ -219,6 +234,16 @@ impl TranslationRequest {
         viewscreen: Self::current_view_screen(),
         coordinate: Self::current_coordinate(),
       },
+      TranslationInput::visual_text_block {
+        content,
+        coordinate,
+        color_pair,
+      } => TranslationContext::visual_text_block {
+        content,
+        viewscreen: Self::current_view_screen(),
+        coordinate,
+        color_pair,
+      },
       TranslationInput::dfhack {
         content,
         coordinate,
@@ -254,6 +279,7 @@ impl TranslationRequest {
       | TranslationContext::addcoloredst { viewscreen, .. }
       | TranslationContext::top_addst { viewscreen, .. }
       | TranslationContext::markup_text_box { viewscreen, .. }
+      | TranslationContext::visual_text_block { viewscreen, .. }
       | TranslationContext::dfhack { viewscreen, .. } => viewscreen.to_owned(),
     }
   }
@@ -266,6 +292,7 @@ impl TranslationRequest {
       | TranslationContext::addcoloredst { coordinate, .. }
       | TranslationContext::top_addst { coordinate, .. }
       | TranslationContext::markup_text_box { coordinate, .. }
+      | TranslationContext::visual_text_block { coordinate, .. }
       | TranslationContext::dfhack { coordinate, .. } => coordinate.to_owned(),
     }
   }
@@ -276,6 +303,7 @@ impl TranslationRequest {
       TranslationContext::addst { color_pair, .. }
       | TranslationContext::addst_flag { color_pair, .. }
       | TranslationContext::top_addst { color_pair, .. }
+      | TranslationContext::visual_text_block { color_pair, .. }
       | TranslationContext::dfhack { color_pair, .. } => Some(color_pair.to_owned()),
       TranslationContext::addcoloredst { .. } | TranslationContext::markup_text_box { .. } => None,
     }

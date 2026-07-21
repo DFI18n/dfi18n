@@ -190,6 +190,24 @@ pub fn mark_occupied(layer: Layer, coord: types::Coordinate, text_block: &text::
   }
 }
 
+pub fn mark_source_region(layer: Layer, coord: types::Coordinate, width: i32, height: i32, id: u16) {
+  let (lo, hi) = id_to_screen_tokens(Some(id));
+  let dims = df::gps::get_dimensions();
+  for row in coord.row..coord.row.saturating_add(height) {
+    if row < 0 || row >= dims.height {
+      continue;
+    }
+    for column in coord.column..coord.column.saturating_add(width) {
+      if column < 0 || column >= dims.width {
+        continue;
+      }
+      let cell = df::renderer::get_cell(&types::Coordinate { column, row }, matches!(layer, Layer::Upper));
+      cell[0] = lo;
+      cell[7] = hi;
+    }
+  }
+}
+
 // Move all occupied marks on a screen layer
 pub fn move_occupied() {
   let mut occupied = get_occupied_mut();

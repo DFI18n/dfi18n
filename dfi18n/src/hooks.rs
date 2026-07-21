@@ -9,17 +9,29 @@ use lua53_sys as lua;
 use sdl2_sys as sdl;
 
 use crate::types::{ColorPair, DFHackPen};
-use crate::{control, df, lang, logging, logo, markup, memory, screen, text, translation, translator, types};
+use crate::{
+  control, df, lang, logging, logo, markup, memory, screen, text, translation, translator, types, visual_block,
+};
 use translation::{TranslationInput, TranslationRequest};
 
 fn addst(gps_ptr: *const ffi::c_void, string_ptr: *const ffi::c_void, just: u8, space: i32) {
-  let bt = crate::backtrace();
-
   let string = cp437_string::cxx_string_to_string(string_ptr);
   let request = TranslationRequest::new(TranslationInput::addst {
     content: string.clone(),
   });
 
+  if control::is_enabled()
+    && visual_block::is_collecting()
+    && visual_block::push(visual_block::Fragment {
+      coordinate: request.coordinate(),
+      text: string,
+      color_pair: request.color_pair().unwrap_or_default(),
+    })
+  {
+    return call_addst(gps_ptr, string_ptr, just, space);
+  }
+
+  let bt = crate::backtrace();
   logging::log_text(&request, &bt, string_ptr);
   let text_block = text::TextBlock::get(&request);
   let columns = text_block.columns();
@@ -350,11 +362,45 @@ fn render_things() {
   screen::clear_screens();
   get_display_title_mut().take();
 
+  if control::is_enabled() {
+    visual_block::begin_frame();
+  } else {
+    visual_block::cancel_frame();
+  }
+
   call_render_things();
 
   // move occupied tiles before rendering
   if control::is_enabled() {
+    for block in visual_block::finish_frame() {
+      let origin = block.origin();
+      let request = TranslationRequest::new(TranslationInput::visual_text_block {
+        content: block.original.clone(),
+        coordinate: origin,
+        color_pair: block.color_pair(),
+      });
+      let Some(response) = translator::translate(&request) else {
+        continue;
+      };
+      let text_block =
+        text::TextBlock::from_visual_translation(response.translated, block.color_pair(), block.columns());
+      let id = text_block.add_to_screen(screen::Layer::Lower, origin);
+      for rect in block.clear_rects() {
+        screen::mark_source_region(
+          screen::Layer::Lower,
+          types::Coordinate {
+            column: rect.x,
+            row: rect.y,
+          },
+          rect.width,
+          rect.height,
+          id,
+        );
+      }
+    }
     screen::move_occupied();
+  } else {
+    visual_block::cancel_frame();
   }
 }
 

@@ -19,6 +19,7 @@ mod text;
 mod translation;
 mod translator;
 mod types;
+mod visual_block;
 
 use lua53_sys as lua;
 

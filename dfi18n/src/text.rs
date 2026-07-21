@@ -178,6 +178,45 @@ impl TextBlock {
     }
   }
 
+  pub fn from_visual_translation(content: String, color_pair: types::ColorPair, columns: usize) -> Self {
+    let columns = columns.max(1);
+    let max_width = columns as i32 * df::renderer::get_renderer_info().orig_size().width;
+    let mut rows = Vec::new();
+    let mut current = String::new();
+    let mut current_width = 0;
+
+    for ch in content.chars() {
+      if ch == '\n' {
+        let mut row = TextRow::new(color_pair);
+        row.push_text(std::mem::take(&mut current));
+        rows.push(row);
+        current_width = 0;
+        continue;
+      }
+
+      let width = glyph::get_glyph_orig_size(ch).0;
+      if !current.is_empty() && current_width + width > max_width {
+        let mut row = TextRow::new(color_pair);
+        row.push_text(std::mem::take(&mut current));
+        rows.push(row);
+        current_width = 0;
+      }
+      current.push(ch);
+      current_width += width;
+    }
+
+    if !current.is_empty() || rows.is_empty() {
+      let mut row = TextRow::new(color_pair);
+      row.push_text(current);
+      rows.push(row);
+    }
+
+    Self {
+      rows,
+      layout: TextLayout::new(columns),
+    }
+  }
+
   // Get a TextBlock from original text without translation
   fn from_original(original: &str, color_pair: types::ColorPair) -> Self {
     let mut row = TextRow::new(color_pair);
