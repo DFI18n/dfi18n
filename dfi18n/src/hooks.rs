@@ -382,23 +382,41 @@ fn render_things() {
       if block.is_sentence() {
         visual_block::record_sentence(&block.original, &request.view_screen());
       }
-      let Some(response) = translator::translate(&request) else {
-        continue;
-      };
-      let text_block =
-        text::TextBlock::from_visual_translation(response.translated, block.color_pair(), block.columns());
-      let id = text_block.add_to_screen(screen::Layer::Lower, origin);
-      for rect in block.clear_rects() {
-        screen::mark_source_region(
-          screen::Layer::Lower,
-          types::Coordinate {
-            column: rect.x,
-            row: rect.y,
-          },
-          rect.width,
-          rect.height,
-          id,
-        );
+      if let Some(response) = translator::translate(&request) {
+        let text_block =
+          text::TextBlock::from_visual_translation(response.translated, block.color_pair(), block.columns());
+        let id = text_block.add_to_screen(screen::Layer::Lower, origin);
+        for rect in block.clear_rects() {
+          screen::mark_source_region(
+            screen::Layer::Lower,
+            types::Coordinate {
+              column: rect.x,
+              row: rect.y,
+            },
+            rect.width,
+            rect.height,
+            id,
+          );
+        }
+      } else {
+        // Preserve develop's original behavior when a reconstructed block has no
+        // translation: translate each addst fragment independently at its source
+        // coordinate. This keeps existing dictionary entries such as
+        // "Temperate" and "Grassland" useful without weakening block matching.
+        for fragment in &block.fragments {
+          let request = TranslationRequest::new(TranslationInput::visual_text_block {
+            content: fragment.text.clone(),
+            coordinate: fragment.coordinate,
+            color_pair: fragment.color_pair,
+          });
+          let Some(response) = translator::translate(&request) else {
+            continue;
+          };
+          let columns = fragment.text.chars().count().max(1);
+          let text_block = text::TextBlock::from_visual_translation(response.translated, fragment.color_pair, columns);
+          let id = text_block.add_to_screen(screen::Layer::Lower, fragment.coordinate);
+          screen::mark_source_region(screen::Layer::Lower, fragment.coordinate, columns as i32, 1, id);
+        }
       }
     }
     screen::move_occupied();
