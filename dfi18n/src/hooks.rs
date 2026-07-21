@@ -379,6 +379,9 @@ fn render_things() {
         coordinate: origin,
         color_pair: block.color_pair(),
       });
+      if block.is_sentence() {
+        visual_block::record_sentence(&block.original, &request.view_screen());
+      }
       let Some(response) = translator::translate(&request) else {
         continue;
       };
