@@ -18,6 +18,10 @@ pub enum TranslationInput {
   addcoloredst {
     markup: String,
   },
+  visual_addcoloredst {
+    markup: String,
+    coordinate: types::Coordinate,
+  },
   top_addst {
     top_content: String,
   },
@@ -45,6 +49,7 @@ impl TranslationInput {
       TranslationInput::addst { .. } => "addst",
       TranslationInput::addst_flag { .. } => "addst_flag",
       TranslationInput::addcoloredst { .. } => "addcoloredst",
+      TranslationInput::visual_addcoloredst { .. } => "addcoloredst",
       TranslationInput::top_addst { .. } => "top_addst",
       TranslationInput::markup_text_box { .. } => "markup_text_box",
       TranslationInput::visual_text_block { .. } => "visual_text_block",
@@ -58,7 +63,9 @@ impl TranslationInput {
       TranslationInput::addst { content }
       | TranslationInput::addst_flag { content, .. }
       | TranslationInput::dfhack { content, .. } => content,
-      TranslationInput::addcoloredst { markup } | TranslationInput::markup_text_box { markup, .. } => markup,
+      TranslationInput::addcoloredst { markup }
+      | TranslationInput::visual_addcoloredst { markup, .. }
+      | TranslationInput::markup_text_box { markup, .. } => markup,
       TranslationInput::visual_text_block { content, .. } => content,
       TranslationInput::top_addst { top_content } => top_content,
     }
@@ -74,7 +81,9 @@ impl TranslationInput {
     match &self {
       TranslationInput::addst { .. } | TranslationInput::addst_flag { .. } => Some(df::gps::get_color_pair(false)),
       TranslationInput::top_addst { .. } => Some(df::gps::get_color_pair(true)),
-      TranslationInput::addcoloredst { .. } | TranslationInput::markup_text_box { .. } => None,
+      TranslationInput::addcoloredst { .. }
+      | TranslationInput::visual_addcoloredst { .. }
+      | TranslationInput::markup_text_box { .. } => None,
       TranslationInput::visual_text_block { color_pair, .. } => Some(color_pair.to_owned()),
       TranslationInput::dfhack { color_pair, .. } => Some(color_pair.to_owned()),
     }
@@ -221,6 +230,11 @@ impl TranslationRequest {
         markup,
         viewscreen: Self::current_view_screen(),
         coordinate: Self::current_coordinate(),
+      },
+      TranslationInput::visual_addcoloredst { markup, coordinate } => TranslationContext::addcoloredst {
+        markup,
+        viewscreen: Self::current_view_screen(),
+        coordinate,
       },
       TranslationInput::top_addst { top_content } => TranslationContext::top_addst {
         top_content,

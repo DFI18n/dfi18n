@@ -26,6 +26,7 @@ fn addst(gps_ptr: *const ffi::c_void, string_ptr: *const ffi::c_void, just: u8, 
       coordinate: request.coordinate(),
       text: string,
       color_pair: request.color_pair().unwrap_or_default(),
+      source: visual_block::FragmentSource::Addst,
     })
   {
     return call_addst(gps_ptr, string_ptr, just, space);
@@ -85,8 +86,6 @@ fn addst_flag(gps_ptr: *const ffi::c_void, string_ptr: *const ffi::c_void, just:
 }
 
 fn addcoloredst(gps_ptr: *const ffi::c_void, string_ptr: *const ffi::c_void, color_string_ptr: *const ffi::c_void) {
-  let bt = crate::backtrace();
-
   // zip color string and reconstruct mtb string for translation
   let mut prev_color = None;
   let string_bytes = unsafe { ffi::CStr::from_ptr(string_ptr as *const ffi::c_char) }.to_bytes();
@@ -108,6 +107,22 @@ fn addcoloredst(gps_ptr: *const ffi::c_void, string_ptr: *const ffi::c_void, col
   let string = cp437_string::c_string_to_string(mtb_string.as_ptr() as *const ffi::c_char);
   let request = TranslationRequest::new(TranslationInput::addcoloredst { markup: string.clone() });
 
+  if control::is_enabled() && visual_block::is_collecting() {
+    let plain_text = cp437_string::c_string_to_string(string_ptr as *const ffi::c_char);
+    let color_pair = color_bytes.first().map_or_default(|color| {
+      ColorPair::from_old_16_colors((color & 7) as i8, ((color & 56) >> 3) as i8, color & 64 != 0)
+    });
+    if visual_block::push(visual_block::Fragment {
+      coordinate: request.coordinate(),
+      text: plain_text,
+      color_pair,
+      source: visual_block::FragmentSource::AddColoredSt { markup: string.clone() },
+    }) {
+      return call_addcoloredst(gps_ptr, string_ptr, color_string_ptr);
+    }
+  }
+
+  let bt = crate::backtrace();
   logging::log_text(&request, &bt, string_ptr);
 
   // always set width for the markup text box before rendering
@@ -394,21 +409,36 @@ fn render_things() {
           id,
         );
       } else {
-        // Preserve develop's original behavior when a reconstructed block has no
-        // translation: translate each addst fragment independently at its source
-        // coordinate. This keeps existing dictionary entries such as
-        // "Temperate" and "Grassland" useful without weakening block matching.
+        // Preserve develop's original behavior when a reconstructed sentence has
+        // no translation: translate each source fragment independently.
         for fragment in &sentence.fragments {
-          let request = TranslationRequest::new(TranslationInput::visual_text_block {
-            content: fragment.text.clone(),
-            coordinate: fragment.coordinate,
-            color_pair: fragment.color_pair,
-          });
+          let request = match &fragment.source {
+            visual_block::FragmentSource::Addst => TranslationRequest::new(TranslationInput::visual_text_block {
+              content: fragment.text.clone(),
+              coordinate: fragment.coordinate,
+              color_pair: fragment.color_pair,
+            }),
+            visual_block::FragmentSource::AddColoredSt { markup } => {
+              TranslationRequest::new(TranslationInput::visual_addcoloredst {
+                markup: markup.clone(),
+                coordinate: fragment.coordinate,
+              })
+            }
+          };
           let Some(response) = translator::translate(&request) else {
             continue;
           };
           let columns = fragment.text.chars().count().max(1);
-          let text_block = text::TextBlock::from_visual_translation(response.translated, fragment.color_pair, columns);
+          let text_block = match &fragment.source {
+            visual_block::FragmentSource::Addst => {
+              text::TextBlock::from_visual_translation(response.translated, fragment.color_pair, columns)
+            }
+            visual_block::FragmentSource::AddColoredSt { .. } => {
+              let mut translated_markup = markup::get(&response.translated);
+              translated_markup.set_width(columns as i32);
+              translated_markup.text_block()
+            }
+          };
           let id = text_block.add_to_screen(screen::Layer::Lower, fragment.coordinate);
           screen::mark_source_region(screen::Layer::Lower, fragment.coordinate, columns as i32, 1, id);
         }

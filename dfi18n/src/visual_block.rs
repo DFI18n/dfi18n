@@ -24,6 +24,13 @@ pub struct Fragment {
   pub coordinate: Coordinate,
   pub text: String,
   pub color_pair: ColorPair,
+  pub source: FragmentSource,
+}
+
+#[derive(Debug, Clone)]
+pub enum FragmentSource {
+  Addst,
+  AddColoredSt { markup: String },
 }
 
 impl Fragment {
@@ -208,8 +215,10 @@ impl Collector {
   }
 
   fn finish(self) -> Vec<VisualTextBlock> {
+    let mut fragments = self.fragments;
+    fragments.sort_by_key(|fragment| (fragment.coordinate.row, fragment.coordinate.column));
     let mut rows: Vec<VisualRow> = Vec::new();
-    for fragment in self.fragments {
+    for fragment in fragments {
       let Some(row) = rows.last_mut() else {
         rows.push(VisualRow::new(fragment));
         continue;
@@ -224,24 +233,21 @@ impl Collector {
     }
 
     let mut blocks: Vec<VisualTextBlock> = Vec::new();
-    let mut current: Option<VisualTextBlock> = None;
     for row in rows {
-      let Some(block) = current.as_mut() else {
-        current = Some(VisualTextBlock::new(row));
-        continue;
-      };
-      let previous = block.rows.last().unwrap();
-      let vertically_adjacent = row.source_rect.y == previous.source_rect.y + previous.source_rect.height;
-      let horizontally_related = row.source_rect.x <= previous.source_rect.x + previous.source_rect.width
-        && previous.source_rect.x <= row.source_rect.x + row.source_rect.width;
-      if vertically_adjacent && horizontally_related {
-        block.append_row(row);
+      let matching_block = blocks.iter().rposition(|block| {
+        let previous = block.rows.last().unwrap();
+        let vertically_adjacent = row.source_rect.y == previous.source_rect.y + previous.source_rect.height;
+        let horizontally_related = row.source_rect.x <= previous.source_rect.x + previous.source_rect.width
+          && previous.source_rect.x <= row.source_rect.x + row.source_rect.width;
+        vertically_adjacent && horizontally_related
+      });
+      if let Some(index) = matching_block {
+        blocks[index].append_row(row);
       } else {
-        blocks.push(current.take().unwrap());
-        current = Some(VisualTextBlock::new(row));
+        blocks.push(VisualTextBlock::new(row));
       }
     }
-    blocks.extend(current);
+    blocks.sort_by_key(|block| (block.source_rect.y, block.source_rect.x));
     blocks
   }
 }
@@ -352,6 +358,16 @@ mod tests {
       coordinate: Coordinate { column: x, row: y },
       text: text.to_owned(),
       color_pair: ColorPair::default(),
+      source: FragmentSource::Addst,
+    }
+  }
+
+  fn colored_fragment(x: i32, y: i32, text: &str) -> Fragment {
+    Fragment {
+      source: FragmentSource::AddColoredSt {
+        markup: format!("[C:7:0:0]{text}"),
+      },
+      ..fragment(x, y, text)
     }
   }
 
@@ -486,6 +502,43 @@ mod tests {
     let sentences = blocks.into_iter().next().unwrap().into_sentences();
     assert_eq!(sentences.len(), 1);
     assert_eq!(sentences[0].original, "She is calm. She has good spatial sense.");
+  }
+
+  #[test]
+  fn spatially_orders_colored_rows_before_reconstructing_a_sentence() {
+    let mut collector = Collector::default();
+    collector.push(colored_fragment(78, 29, "life."));
+    collector.push(colored_fragment(
+      78,
+      28,
+      "She is not distracted after leading an unexciting",
+    ));
+
+    let blocks = collector.finish();
+    assert_eq!(blocks.len(), 1);
+    let sentences = blocks.into_iter().next().unwrap().into_sentences();
+    assert_eq!(sentences.len(), 1);
+    assert_eq!(
+      sentences[0].original,
+      "She is not distracted after leading an unexciting life."
+    );
+    assert!(
+      sentences[0].fragments.iter().all(|fragment| matches!(fragment.source, FragmentSource::AddColoredSt { .. }))
+    );
+  }
+
+  #[test]
+  fn keeps_two_visual_columns_in_separate_boxes() {
+    let mut collector = Collector::default();
+    collector.push(colored_fragment(2, 10, "Left first"));
+    collector.push(colored_fragment(40, 10, "Right first"));
+    collector.push(colored_fragment(2, 11, "left second."));
+    collector.push(colored_fragment(40, 11, "right second."));
+
+    let blocks = collector.finish();
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(blocks[0].original, "Left first left second.");
+    assert_eq!(blocks[1].original, "Right first right second.");
   }
 
   #[test]
