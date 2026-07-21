@@ -26,12 +26,37 @@ end
 -- get all MOD data directory paths from different MODs
 function data_paths()
   local paths = {}
-  for _, v in ipairs(scriptmanager.get_mod_paths(MOD_ID .. '-data')) do
-    local data_config_file = v.path .. '/' .. MOD_ID .. '.txt'
+  local seen = {}
+
+  local function append_data_path(path)
+    if not path then
+      return
+    end
+    path = path:gsub('\\', '/')
+    if seen[path] then
+      return
+    end
+    local data_config_file = path .. '/' .. MOD_ID .. '.txt'
     if dfhack.filesystem.isfile(data_config_file) then
-      table.insert(paths, v.path)
+      seen[path] = true
+      table.insert(paths, path)
     end
   end
+
+  -- Load subscribed companion data MODs first.
+  for _, v in ipairs(scriptmanager.get_mod_paths(MOD_ID .. '-data')) do
+    append_data_path(v.path)
+  end
+
+  -- Load project-owned overrides last so they can extend or override workshop
+  -- dictionaries without modifying the subscribed data MOD.
+  for _, v in ipairs(scriptmanager.get_mod_paths(MOD_ID)) do
+    append_data_path(v.path .. '/local-data')
+  end
+  if MOD_SOURCE_PATH then
+    append_data_path(MOD_SOURCE_PATH .. '/local-data')
+  end
+
   return paths
 end
 
