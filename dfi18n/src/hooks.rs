@@ -398,8 +398,18 @@ fn render_things() {
         visual_block::record_sentence(&sentence.original, &request.view_screen());
       }
       if let Some(response) = translator::translate(&request) {
-        let text_block =
-          text::TextBlock::from_visual_translation(response.translated, sentence.color_pair(), sentence.columns());
+        let text_block = if let Some(color_markup) = sentence.leading_color_markup() {
+          let translated = if response.translated.starts_with("[C:") {
+            response.translated
+          } else {
+            format!("{color_markup}{}", response.translated)
+          };
+          let mut translated_markup = markup::get(&translated);
+          translated_markup.set_width(sentence.columns() as i32);
+          translated_markup.text_block()
+        } else {
+          text::TextBlock::from_visual_translation(response.translated, sentence.color_pair(), sentence.columns())
+        };
         let id = text_block.add_to_screen(screen::Layer::Lower, origin);
         screen::mark_source_region(
           screen::Layer::Lower,

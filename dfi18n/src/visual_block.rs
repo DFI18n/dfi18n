@@ -160,6 +160,19 @@ impl VisualSentence {
   pub fn is_complete(&self) -> bool {
     self.complete
   }
+
+  pub fn leading_color_markup(&self) -> Option<&str> {
+    self.fragments.iter().find_map(|fragment| {
+      let FragmentSource::AddColoredSt { markup } = &fragment.source else {
+        return None;
+      };
+      if !markup.starts_with("[C:") {
+        return None;
+      }
+      let end = markup.find(']')?;
+      Some(&markup[..=end])
+    })
+  }
 }
 
 fn union_rect(left: Rect, right: Rect) -> Rect {
@@ -525,6 +538,7 @@ mod tests {
     assert!(
       sentences[0].fragments.iter().all(|fragment| matches!(fragment.source, FragmentSource::AddColoredSt { .. }))
     );
+    assert_eq!(sentences[0].leading_color_markup(), Some("[C:7:0:0]"));
   }
 
   #[test]
