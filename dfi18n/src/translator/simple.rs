@@ -32,28 +32,74 @@ fn get_dicts_mut() -> RwLockWriteGuard<'static, SimpleDictionaries> {
   DICTS.get_or_init(|| RwLock::new(SimpleDictionaries::new())).write().unwrap()
 }
 
-// Translate text based on the provided language tag and context
+// Translate text based on the provided language tag and context.
 pub fn translate(
   lang_tag: &str,
   context: &translation::TranslationContext,
 ) -> Option<translation::TranslationResponse> {
-  // Extract the text to be translated from the context, colored text is not handled here
   let text = context.original();
-
   let dicts = get_dicts();
-  dicts.get(lang_tag).and_then(|dict| {
-    dict.get(text).and_then(|(translated, tags)| {
-      Some(translation::TranslationResponse {
-        translated: translated.to_owned(),
-        alignment: match tags.get("ALIGNMENT").map(|s| s.as_str()) {
-          Some("LEFT") => translation::TextAlignment::Left,
-          Some("RIGHT") => translation::TextAlignment::Right,
-          Some("CENTER") => translation::TextAlignment::Center,
-          _ => translation::TextAlignment::Left,
-        },
-      })
-    })
-  })
+  let dict = dicts.get(lang_tag)?;
+
+  // Prefer the exact key, including markup and color transitions.
+  if let Some((translated, tags)) = dict.get(text) {
+    return Some(translation::TranslationResponse {
+      translated: translated.to_owned(),
+      alignment: alignment_from_tags(tags),
+    });
+  }
+
+  // Captured addcoloredst strings often have one color prefix while the data
+  // dictionary contains the same sentence without that runtime-only prefix.
+  // Reuse that ordinary entry and restore the color prefix. Do not attempt
+  // multi-color markup here: exact markup entries above preserve those colors.
+  if let Some((prefix_end, body)) = single_color_prefix(text) {
+    if let Some((translated, tags)) = dict.get(body) {
+      let mut restored = String::with_capacity(prefix_end + translated.len());
+      restored.push_str(&text[..prefix_end]);
+      restored.push_str(translated);
+      return Some(translation::TranslationResponse {
+        translated: restored,
+        alignment: alignment_from_tags(tags),
+      });
+    }
+  }
+
+  None
+}
+
+fn alignment_from_tags(tags: &HashMap<String, String>) -> translation::TextAlignment {
+  match tags.get("ALIGNMENT").map(|s| s.as_str()) {
+    Some("LEFT") => translation::TextAlignment::Left,
+    Some("RIGHT") => translation::TextAlignment::Right,
+    Some("CENTER") => translation::TextAlignment::Center,
+    _ => translation::TextAlignment::Left,
+  }
+}
+
+fn single_color_prefix(text: &str) -> Option<(usize, &str)> {
+  if !text.starts_with("[C:") {
+    return None;
+  }
+  let end = text.find(']')? + 1;
+  let body = &text[end..];
+  if body.contains("[C:") {
+    return None;
+  }
+  Some((end, body))
+}
+
+// Check whether a string is present in the simple dictionary for a lang tag
+pub fn contains(lang_tag: &str, text: &str) -> bool {
+  let dicts = get_dicts();
+  dicts.get(lang_tag).map(|d| d.contains_key(text)).unwrap_or(false)
+}
+
+// Insert or replace a translation into the simple dictionary for a lang tag
+pub fn insert_translation(lang_tag: &str, text: &str, translation: &str) {
+  let mut dicts = get_dicts_mut();
+  let dict = dicts.entry(lang_tag.to_string()).or_insert_with(SimpleDictionary::new);
+  dict.insert(text.to_string(), (translation.to_string(), HashMap::new()));
 }
 
 // Load a simple dictionary from a CSV file into the global storage

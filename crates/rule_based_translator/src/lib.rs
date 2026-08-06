@@ -9,13 +9,26 @@ mod replacer;
 pub use replacer::*;
 
 // A rule-based translator
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Translator {
   // All rulesets loaded
   rulesets: RuleSets,
+  // Per-translation rule-iteration budget
+  budget: usize,
+}
+
+impl Default for Translator {
+  fn default() -> Self {
+    Translator { rulesets: RuleSets::new(), budget: RULE_MATCH_BUDGET }
+  }
 }
 
 impl Translator {
+  // Set the per-translation matching budget (rule iterations before giving up)
+  pub fn set_budget(&mut self, budget: usize) {
+    self.budget = budget;
+  }
+
   // Load rulesets from a directory
   pub fn load_from_dir(&mut self, path: impl AsRef<path::Path>) -> Result<()> {
     let base = path.as_ref().to_path_buf();
@@ -32,9 +45,14 @@ impl Translator {
     results.into_iter().min_by_key(|result| result.weight()).map(|result| result.translated)
   }
 
+  // Debug: names of all loaded rulesets and their rule counts
+  pub fn ruleset_summary(&self) -> Vec<(String, usize)> {
+    self.rulesets.iter().map(|(k, rs)| (k.clone(), rs.len())).collect()
+  }
+
   // Get all translation results for the given text, for debugging purposes
   pub fn get_all_translations(&self, text: &str, partial_match: bool) -> Vec<ResultTree> {
-    let mut context = Context::default();
+    let mut context = Context { budget: self.budget, ..Context::default() };
     let results = self.do_translate(&mut context, text, "::", 0);
     if partial_match {
       return results;
@@ -78,6 +96,11 @@ impl Translator {
     // for each rule in the ruleset identified by the identifier
     log::trace!("{indent}Translate {text:?} using ruleset {identifier:?}...");
     for (original, translated) in self.rulesets.get(identifier).expect(&format!("ruleset {identifier:?} not found")) {
+      // abort the whole search when the per-translation budget is exhausted
+      if !context.spend() {
+        return Vec::new();
+      }
+
       // start matching from the beginning of the text
       let first_candidate = Candidate::new(IndexMap::new(), text);
       let mut candidates = vec![first_candidate];
@@ -523,10 +546,40 @@ pub struct RuleNode {
   pub rule: Tokens,
 }
 
-#[derive(Default)]
+// Maximum number of rule iterations a single translation may attempt before
+// giving up. The ruleset matcher is a recursive backtracking search over the
+// referenced rulesets (root references ~20 sub-rulesets). Too small a budget
+// silently disables coverage for deep matches (names, skills, body parts), so
+// this must be large enough to resolve those. The matcher runs on the async
+// translate task, not the render thread, so a generous budget does not stutter
+// the game; it only bounds worst-case background CPU.
+const RULE_MATCH_BUDGET: usize = 100_000_000;
+
 pub struct Context {
   pub identifier_path: Vec<String>,
   pub cyclic_rules: BTreeSet<RuleNode>,
+  pub budget: usize,
+}
+
+impl Default for Context {
+  fn default() -> Self {
+    Context {
+      identifier_path: Vec::new(),
+      cyclic_rules: BTreeSet::new(),
+      budget: RULE_MATCH_BUDGET,
+    }
+  }
+}
+
+impl Context {
+  // Spend one unit of the matching budget; returns false when exhausted.
+  fn spend(&mut self) -> bool {
+    if self.budget == 0 {
+      return false;
+    }
+    self.budget -= 1;
+    true
+  }
 }
 
 // A candidate during token matching

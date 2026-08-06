@@ -143,6 +143,9 @@ pub struct TextBlock {
   rows: Vec<TextRow>,
   // The layout information for the text block
   layout: TextLayout,
+  // The original (untranslated) text this block was built from, if any.
+  // Kept so the block can be re-translated in place when the dictionary updates.
+  original: String,
 }
 
 impl Deref for TextBlock {
@@ -162,6 +165,13 @@ impl DerefMut for TextBlock {
 }
 
 impl TextBlock {
+  // Record the original text this block was built from (for in-place retranslation)
+  pub fn set_original(&mut self, original: &str) {
+    self.original = original.to_owned();
+  }
+}
+
+impl TextBlock {
   // Create a TextBlock with specified number of columns and default layout
   pub fn from_columns(columns: usize) -> Self {
     TextBlock {
@@ -175,6 +185,7 @@ impl TextBlock {
     TextBlock {
       rows: vec![row],
       layout,
+      original: String::new(),
     }
   }
 
@@ -183,7 +194,10 @@ impl TextBlock {
     let mut row = TextRow::new(color_pair);
     row.push_text(original.to_owned());
     let layout = TextLayout::new(original.len());
-    Self::from_row(row, layout)
+    Self {
+      original: original.to_owned(),
+      ..Self::from_row(row, layout)
+    }
   }
 
   // Get a TextBlock from a TranslationRequest, using cache if available
@@ -264,7 +278,10 @@ impl TextBlock {
         layout
       };
 
-      return Self::from_row(row, layout);
+      return Self {
+        original: original.to_owned(),
+        ..Self::from_row(row, layout)
+      };
     }
 
     // fallback to original text

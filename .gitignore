@@ -21,3 +21,14 @@
 target
 mod/dfi18n/libs/*.dll
 mod/dfi18n/libs/*.so
+
+# Reverse-engineering / analysis scripts (kept on the personal-tools feature
+# branch, not part of the framework)
+tools/disasm.py
+tools/extract_fragments.py
+tools/find_callers.py
+tools/trace_draw.py
+
+# Python bytecode
+__pycache__/
+*.pyc

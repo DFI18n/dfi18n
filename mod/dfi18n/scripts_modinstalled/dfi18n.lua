@@ -14,6 +14,17 @@ local function dfi18n(args)
     mod.toggle()
   elseif action == "reload" then
     mod.reload()
+  elseif action == "autoreload" then
+    local state = args[2]
+    if state == "on" or state == "enable" then
+      mod.enable_auto_reload()
+    elseif state == "off" or state == "disable" then
+      mod.disable_auto_reload()
+    else
+      print(("auto dictionary reload: %s"):format(
+        mod.auto_reload_enabled_state() and "on" or "off"))
+      print("Usage: dfi18n autoreload on|off")
+    end
   elseif action == "change" then
     local lang_tag = args[2]
     if not lang_tag then

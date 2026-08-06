@@ -19,10 +19,45 @@ pub fn translate(
   let translator = translators.get(lang_tag)?;
   let text = context.original();
 
-  translator.translate(text).map(|translated| translation::TranslationResponse {
-    translated,
-    alignment: translation::TextAlignment::default(),
-  })
+  // Prefer the exact text, including any color markup.
+  if let Some(translated) = translator.translate(text) {
+    return Some(translation::TranslationResponse {
+      translated,
+      alignment: translation::TextAlignment::default(),
+    });
+  }
+
+  // addcoloredst strings carry a runtime color prefix ([C:r:g:b]) that the
+  // ruleset rules (written against plain composed text) do not contain, so
+  // ruleset coverage silently missed them and they went to the realtime API.
+  // Reuse the plain body and restore the color prefix around the translation.
+  if let Some((prefix_end, body)) = single_color_prefix(text) {
+    if let Some(translated) = translator.translate(body) {
+      let mut restored = String::with_capacity(prefix_end + translated.len());
+      restored.push_str(&text[..prefix_end]);
+      restored.push_str(&translated);
+      return Some(translation::TranslationResponse {
+        translated: restored,
+        alignment: translation::TextAlignment::default(),
+      });
+    }
+  }
+
+  None
+}
+
+// Returns the byte offset just past a single leading [C:r:g:b] color tag and
+// the remaining plain body, if the whole string has exactly one such prefix.
+fn single_color_prefix(text: &str) -> Option<(usize, &str)> {
+  if !text.starts_with("[C:") {
+    return None;
+  }
+  let end = text.find(']')? + 1;
+  let body = &text[end..];
+  if body.contains("[C:") {
+    return None;
+  }
+  Some((end, body))
 }
 
 // A global registry of translators categorized by type and language tag

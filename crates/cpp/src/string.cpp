@@ -32,4 +32,11 @@ extern "C"
     string *s = (string *)ptr;
     delete s;
   }
+
+  // Assign a C string to an existing C++ string (frees old buffer, copies new)
+  void cpp_assign_string(void *target, const char *cstr)
+  {
+    string *s = (string *)target;
+    s->assign(cstr);
+  }
 }

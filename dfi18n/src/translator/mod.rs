@@ -8,6 +8,20 @@ use crate::{game, lang, tasks, translation};
 mod rulesets;
 mod simple;
 
+// Check if a string is covered by the simple dictionary (used by the realtime
+// translator to decide whether a captured string still needs translating).
+pub fn is_translated(original: &str) -> bool {
+  let lang_tag = lang::current_lang_tag();
+  simple::contains(&lang_tag, original)
+}
+
+// Insert/replace a translation into the simple dictionary (used by the
+// realtime translator to apply translations immediately, before persistence).
+pub fn insert_translation(original: &str, translated: &str) {
+  let lang_tag = lang::current_lang_tag();
+  simple::insert_translation(&lang_tag, original, translated);
+}
+
 // Reset the translators and translation caches
 pub fn reset() {
   rulesets::reset();
@@ -38,7 +52,21 @@ pub fn should_skip_translation(original: &str) -> bool {
 
   original.len() < 2
     || original.starts_with("FPS: ")
+    // pure numbers / dimensions / selection sizes ("1251", "10x10x1", "3 x 5")
+    // are rendered as-is: no translation needed, and skipping them avoids
+    // burning the ruleset matcher budget + realtime queue on every drag frame
+    || is_numeric_size(original)
     || original.chars().all(|c| c.is_ascii_digit() || c.is_ascii_punctuation() || c.is_ascii_whitespace())
+}
+
+// Whether a string is a numeric size/dimension like "10x10x1" or "3 x 5"
+// (digits separated by x/X/×/*). Requires at least one separator so plain
+// numbers fall through to the all-digit check above.
+fn is_numeric_size(s: &str) -> bool {
+  let compact: String = s.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+  let parts: Vec<&str> = compact.split(['x', 'X', '×', '*']).collect();
+  parts.len() >= 2
+    && parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
 }
 
 // Translate the given TranslationRequest
@@ -49,18 +77,52 @@ pub fn translate(request: &translation::TranslationRequest) -> Option<translatio
   let cache = caches.entry(lang_tag.clone()).or_insert_with(TranslationCache::new);
   let key = request.key();
   if let Some(cached) = cache.get(key) {
-    // return cached response
+    // return cached response (Some or None): trusting the cache avoids
+    // re-running the (potentially expensive) ruleset matcher on every render
     return cached.clone();
-  } else {
-    // insert a placeholder to indicate this request is being processed
-    cache.insert(key.to_owned(), None);
   }
 
-  // spawn a task to perform the translation
+  // Synchronous path consults ONLY the simple in-memory dictionary (a plain
+  // HashMap lookup, no API, no stutter). The ruleset matcher is intentionally
+  // NOT run here: it can take hundreds of milliseconds for text that matches
+  // nothing, which would stall the render thread. Ruleset-covered strings are
+  // resolved by the async translate_task, which fills the cache a frame later
+  // (so they become Chinese on the next render without blocking).
+  if request.original() == game::version() {
+    let translated = format!(
+      "{} + {}-{} v{}",
+      game::version(),
+      crate::MOD_NAME,
+      game::os_platform(),
+      game::mod_version()
+    );
+    let response = translation::TranslationResponse {
+      translated,
+      alignment: translation::TextAlignment::default(),
+    };
+    cache.insert(key.to_owned(), Some(response.clone()));
+    return Some(response);
+  }
+  if let Some(response) = simple::translate(&lang_tag, request.context()) {
+    cache.insert(key.to_owned(), Some(response.clone()));
+    return Some(response);
+  }
+
+  // insert a placeholder to indicate this request is being processed
+  cache.insert(key.to_owned(), None);
+
+  // spawn a task to perform the full translation (rulesets + realtime queue)
   tasks::spawn(translate_task(request.clone()));
 
   // return no translation for now
   None
+}
+
+// Clear only the translation caches (not the dictionaries). Called after the
+// realtime translator inserts new entries so previously-missed keys are
+// re-evaluated on the next request.
+pub fn clear_cache() {
+  get_caches_mut().clear();
 }
 
 // The translation task that performs the actual translation

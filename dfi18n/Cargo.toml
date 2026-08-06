@@ -32,6 +32,9 @@ retour = { workspace = true }
 serde = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true }
+ureq = { version = "3", features = ["json"] }
+serde_json = "1"
+parking_lot = "0.12"
 with_builtin_macros = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]

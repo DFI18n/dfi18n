@@ -13,6 +13,7 @@ mod logging;
 mod logo;
 mod markup;
 mod memory;
+mod realtime_translate;
 mod screen;
 mod tasks;
 mod text;
@@ -35,6 +36,7 @@ extern "C" fn setup() {
   logger::setup();
   tasks::setup();
   rule_based_translator::register_default_replacers();
+  realtime_translate::setup();
 }
 
 // Initialize the MOD from Lua and setup hooks for the game
@@ -71,6 +73,17 @@ extern "C" fn init(lua_state: *mut std::ffi::c_void) {
     log::error!("failed to attach hooks: {}", err);
     return;
   }
+}
+
+// Reload the translation dictionaries and clear the text-block cache so
+// already-rendered text re-renders with the newly translated entries (e.g. the
+// realtime translator fills the dictionary while the game runs). Clears only
+// dictionaries + translation cache + text blocks; fonts and markup are kept.
+#[unsafe(no_mangle)]
+extern "C" fn reload_dict() {
+  translator::reset();
+  text::reset();
+  log::info!("Dictionaries and text blocks reset for reload");
 }
 
 // XXX: debug function for testing

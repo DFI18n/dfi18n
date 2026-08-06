@@ -152,7 +152,7 @@ function setup()
 
   -- add memory regions
   for i, mem in ipairs(dfhack.internal.getMemRanges()) do
-    if mem.read and mem.execute and (string.match(mem.name, '%bDwarf Fortress%.exe$') or string.match(mem.name, '%bdfhooks_dfhack%.dll$') or string.match(mem.name, '%bdwarfort$') or string.match(mem.name, '%blibg_src_lib%.so$') or string.match(mem.name, '%blibdfhack%.so$')) then
+    if mem.read and mem.execute and (string.match(mem.name, '%bDwarf Fortress%.exe$') or string.match(mem.name, '%bdfhooks_dfhack%.dll$') or string.match(mem.name, '%bdfhack%.dll$') or string.match(mem.name, '%bdwarfort$') or string.match(mem.name, '%blibg_src_lib%.so$') or string.match(mem.name, '%blibdfhack%.so$')) then
       native.add_memory_region(mem.name, mem.base_addr or 0, mem.start_addr, mem.end_addr)
     end
   end
@@ -225,6 +225,61 @@ function reload()
 
   native.reset()
   dfhack.timeout(1, 'frames', load)
+end
+
+-- ---------------- auto dictionary reload ----------------
+-- Watches the dictionary files on disk and reloads just the dictionaries when
+-- they change (e.g. the realtime_translate tool appends to ai_fill.csv while
+-- the game runs). Uses the lightweight reload_dict (clears dicts + translation
+-- cache only) so the screen does not flicker.
+local auto_reload_enabled = false
+local auto_reload_interval_ms = 5000
+local last_mtimes = {}
+
+local function dict_mtimes()
+  local mtimes = {}
+  for _, data_path in ipairs(helpers.data_paths()) do
+    local files = dfhack.filesystem.listdir_recursive(data_path, nil, false)
+    if files then
+      for _, f in ipairs(files) do
+        if f.path:endswith('.csv') or f.path:endswith('.toml') then
+          mtimes[f.path] = dfhack.filesystem.mtime(f.path)
+        end
+      end
+    end
+  end
+  return mtimes
+end
+
+local function watch_dicts()
+  if not auto_reload_enabled then return end
+  local cur = dict_mtimes()
+  for path, t in pairs(cur) do
+    if last_mtimes[path] and last_mtimes[path] ~= t then
+      p("dictionary changed (%s), reloading...", path)
+      native.reload_dict()
+      dfhack.timeout(1, 'frames', load)
+      break
+    end
+  end
+  last_mtimes = cur
+  dfhack.timeout(auto_reload_interval_ms, 'milliseconds', watch_dicts)
+end
+
+function enable_auto_reload()
+  auto_reload_enabled = true
+  last_mtimes = dict_mtimes()
+  dfhack.timeout(auto_reload_interval_ms, 'milliseconds', watch_dicts)
+  p("auto dictionary reload enabled (every %d ms)", auto_reload_interval_ms)
+end
+
+function disable_auto_reload()
+  auto_reload_enabled = false
+  p("auto dictionary reload disabled")
+end
+
+function auto_reload_enabled_state()
+  return auto_reload_enabled
 end
 
 -- enable the MOD

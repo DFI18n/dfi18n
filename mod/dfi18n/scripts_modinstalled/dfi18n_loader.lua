@@ -22,5 +22,9 @@ mod.enable()
 -- setup hooks on DFHack
 mod.setup_hooks()
 
+-- enable auto dictionary reload by default (the built-in realtime translator
+-- writes to the dictionary while the game runs; this hot-reloads it)
+mod.enable_auto_reload()
+
 -- done
 mod.p("has been enabled.")
