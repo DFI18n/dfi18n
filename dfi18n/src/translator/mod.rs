@@ -15,8 +15,14 @@ pub fn reset() {
   get_caches_mut().clear();
 }
 
-// Translation cache maps TranslationRequest key to optional TranslationResponse
-type TranslationCache = HashMap<String, Option<translation::TranslationResponse>>;
+enum TranslationCacheEntry {
+  Pending,
+  Resolved(Option<translation::TranslationResponse>),
+}
+
+// Translation cache maps TranslationRequest keys to an explicit asynchronous
+// state so callers can distinguish "not finished" from "no match".
+type TranslationCache = HashMap<String, TranslationCacheEntry>;
 
 // A collection of translation caches grouped by language tag
 type TranslationCaches = HashMap<String, TranslationCache>;
@@ -43,24 +49,39 @@ pub fn should_skip_translation(original: &str) -> bool {
 
 // Translate the given TranslationRequest
 pub fn translate(request: &translation::TranslationRequest) -> Option<translation::TranslationResponse> {
+  match translation_status(request) {
+    TranslationStatus::Translated(response) => Some(response),
+    TranslationStatus::Pending | TranslationStatus::Missing => None,
+  }
+}
+
+pub enum TranslationStatus {
+  Pending,
+  Missing,
+  Translated(translation::TranslationResponse),
+}
+
+pub fn translation_status(request: &translation::TranslationRequest) -> TranslationStatus {
   let lang_tag = lang::current_lang_tag();
 
   let mut caches = get_caches_mut();
-  let cache = caches.entry(lang_tag.clone()).or_insert_with(TranslationCache::new);
+  let cache = caches.entry(lang_tag).or_default();
   let key = request.key();
   if let Some(cached) = cache.get(key) {
-    // return cached response
-    return cached.clone();
-  } else {
-    // insert a placeholder to indicate this request is being processed
-    cache.insert(key.to_owned(), None);
+    return match cached {
+      TranslationCacheEntry::Pending => TranslationStatus::Pending,
+      TranslationCacheEntry::Resolved(Some(response)) => TranslationStatus::Translated(response.clone()),
+      TranslationCacheEntry::Resolved(None) => TranslationStatus::Missing,
+    };
   }
+  // Insert a placeholder to indicate this request is being processed.
+  cache.insert(key.to_owned(), TranslationCacheEntry::Pending);
 
   // spawn a task to perform the translation
   tasks::spawn(translate_task(request.clone()));
 
   // return no translation for now
-  None
+  TranslationStatus::Pending
 }
 
 // The translation task that performs the actual translation
@@ -69,8 +90,8 @@ pub async fn translate_task(request: translation::TranslationRequest) {
 
   let response = do_translate(&request);
   let mut caches = get_caches_mut();
-  let cache = caches.entry(lang_tag).or_insert_with(TranslationCache::new);
-  cache.insert(request.key().to_owned(), response);
+  let cache = caches.entry(lang_tag).or_default();
+  cache.insert(request.key().to_owned(), TranslationCacheEntry::Resolved(response));
 }
 
 // Perform the actual translation using different methods
@@ -94,9 +115,7 @@ pub fn do_translate(request: &translation::TranslationRequest) -> Option<transla
   let lang_tag = lang::current_lang_tag();
 
   // chain translation methods
-  None
-    .or_else(|| simple::translate(&lang_tag, request.context()))
-    .or_else(|| rulesets::translate(&lang_tag, request.context()))
+  simple::translate(&lang_tag, request.context()).or_else(|| rulesets::translate(&lang_tag, request.context()))
 }
 
 // Synchronous translation function called from Lua (will not use cache)
@@ -106,11 +125,11 @@ extern "C" fn sync_translate(lua_state: *mut std::ffi::c_void) -> i32 {
   let request = translation::TranslationRequest::new(translation::TranslationInput::addst { content });
   let response = do_translate(&request);
   if let Some(response) = response {
-    lua::push_string(lua_state, &response.translated.as_str());
+    lua::push_string(lua_state, response.translated.as_str());
   } else {
     lua::push_nil(lua_state);
   }
-  return 1;
+  1
 }
 
 // Asynchronous translation function called from Lua
@@ -120,9 +139,9 @@ extern "C" fn async_translate(lua_state: *mut std::ffi::c_void) -> i32 {
   let request = translation::TranslationRequest::new(translation::TranslationInput::addst { content });
   let response = translate(&request);
   if let Some(response) = response {
-    lua::push_string(lua_state, &response.translated.as_str());
+    lua::push_string(lua_state, response.translated.as_str());
   } else {
     lua::push_nil(lua_state);
   }
-  return 1;
+  1
 }

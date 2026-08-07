@@ -1,4 +1,4 @@
-use std::sync::{Mutex, MutexGuard, OnceLock, RwLock};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::{ffi, ptr};
 
 use anyhow::Result;
@@ -10,7 +10,8 @@ use sdl2_sys as sdl;
 
 use crate::types::{ColorPair, DFHackPen};
 use crate::{
-  control, df, lang, logging, logo, markup, memory, screen, text, translation, translator, types, visual_block,
+  cloud_translation, control, df, glyph, lang, logging, logo, markup, memory, screen, text, translation, translator,
+  types, visual_block,
 };
 use translation::{TranslationInput, TranslationRequest};
 
@@ -127,10 +128,10 @@ fn addcoloredst(gps_ptr: *const ffi::c_void, string_ptr: *const ffi::c_void, col
 
   // always set width for the markup text box before rendering
   let mut markup = string.clone();
-  if control::is_enabled() {
-    if let Some(response) = translator::translate(&request) {
-      markup = response.translated;
-    }
+  if control::is_enabled()
+    && let Some(response) = translator::translate(&request)
+  {
+    markup = response.translated;
   }
   let mut markup = markup::get(&markup);
   markup.set_width(string_bytes.len() as i32);
@@ -243,9 +244,37 @@ fn update_tile(renderer_ptr: *const ffi::c_void, x: i32, y: i32) {
   for (id, coordinate, text_block) in screen::get_text_blocks(screen::Layer::Lower) {
     text_block.render(&sdl_renderer, &coordinate, screen::Layer::Lower, id);
   }
+
+  if df::view_screen::get_view_screen().starts_with("::t::initial_prep::title") {
+    render_menu_version_badge(&sdl_renderer);
+  }
 }
 
-static LAST_DIMENSIONS: OnceLock<RwLock<types::Dimensions>> = OnceLock::new();
+fn render_menu_version_badge(renderer: &sdl::Renderer<'static>) {
+  const LABEL: &[u8] = b"DFI18N v2";
+  const COLOR: (u8, u8, u8) = (160, 160, 160);
+
+  let renderer_info = df::renderer::get_renderer_info();
+  let origin = renderer_info.origin_offset();
+  let canvas = renderer_info.canvas_size();
+  let cell = renderer_info.zoom_size();
+  let label_width = LABEL.len() as i32 * cell.width;
+  let start_x = origin.column + (canvas.width - label_width - cell.width).max(0);
+  let y = origin.row + (canvas.height - cell.height * 2).max(0);
+
+  for (index, codepoint) in LABEL.iter().copied().enumerate() {
+    let texture = glyph::get_curses_glyph_texture(renderer, codepoint);
+    texture.set_color_mod(COLOR.0, COLOR.1, COLOR.2);
+    let rect = sdl::SDL_Rect {
+      x: start_x + index as i32 * cell.width,
+      y,
+      w: cell.width,
+      h: cell.height,
+    };
+    renderer.copy(&texture, None, Some(&rect));
+  }
+}
+
 static DISPLAY_TITLE: OnceLock<Mutex<Option<sdl::Texture<'static>>>> = OnceLock::new();
 
 // Getting access to the display title texture
@@ -256,21 +285,10 @@ fn get_display_title_mut() -> MutexGuard<'static, Option<sdl::Texture<'static>>>
 fn update_all(renderer_ptr: *const ffi::c_void) {
   if control::is_enabled() {
     let display_title = df::gps::get_display_title();
-    if *display_title {
-      if let Some(logo_texture) = logo::get_title_logo_by_lang_tag(&lang::current_lang_tag()) {
-        get_display_title_mut().replace(logo_texture);
-        *display_title = false;
-      }
+    if *display_title && let Some(logo_texture) = logo::get_title_logo_by_lang_tag(&lang::current_lang_tag()) {
+      get_display_title_mut().replace(logo_texture);
+      *display_title = false;
     }
-  }
-  let mut dimensions = LAST_DIMENSIONS.get_or_init(|| RwLock::new(types::Dimensions::default())).write().unwrap();
-
-  let last_dimensions = dimensions.clone();
-  let curr_dimensions = df::gps::get_dimensions().clone();
-
-  if curr_dimensions != last_dimensions {
-    dimensions.clone_from(&curr_dimensions);
-    // log::debug!("Dimension changed: {curr_dimensions:?}");
   }
 
   call_update_all(renderer_ptr);
@@ -373,6 +391,42 @@ fn dfhack_addstr_flag(lua_state: *mut ffi::c_void) {
   screen::mark_occupied(screen::Layer::Lower, bottom_coord, &text_block, Some(id));
 }
 
+fn translate_preference_component(
+  content: &str,
+  origin: types::Coordinate,
+  color_pair: types::ColorPair,
+) -> Option<String> {
+  let request = TranslationRequest::new(TranslationInput::visual_text_block {
+    content: content.to_owned(),
+    coordinate: origin,
+    color_pair,
+  });
+  match translator::translation_status(&request) {
+    translator::TranslationStatus::Translated(response) => Some(response.translated),
+    translator::TranslationStatus::Pending | translator::TranslationStatus::Missing => None,
+  }
+}
+
+fn translate_preference_block(
+  block: visual_block::PreferenceBlock,
+  origin: types::Coordinate,
+  color_pair: types::ColorPair,
+  context: &str,
+) -> translation::TranslationResponse {
+  for section in &block.sections {
+    visual_block::record_split_sentence(&rule_based_translator::preference_section_source(section), context);
+  }
+
+  let translated = visual_block::compose_preference_block(&block, |content| {
+    translate_preference_component(content, origin, color_pair)
+  });
+
+  translation::TranslationResponse {
+    translated,
+    alignment: translation::TextAlignment::default(),
+  }
+}
+
 fn render_things() {
   screen::clear_screens();
   get_display_title_mut().take();
@@ -397,7 +451,70 @@ fn render_things() {
       if sentence.is_complete() {
         visual_block::record_sentence(&sentence.original, &request.view_screen());
       }
-      if let Some(response) = translator::translate(&request) {
+      let mut local_exhausted = false;
+      let mut response = if let Some(preference_block) = visual_block::split_preference_block(&sentence.original) {
+        Some(translate_preference_block(
+          preference_block,
+          origin,
+          sentence.color_pair(),
+          &request.view_screen(),
+        ))
+      } else {
+        match translator::translation_status(&request) {
+          translator::TranslationStatus::Translated(response) => Some(response),
+          translator::TranslationStatus::Pending => None,
+          translator::TranslationStatus::Missing => {
+            let split_sentences = visual_block::split_semantic_sentences(&sentence.original);
+            if split_sentences.len() < 2 {
+              local_exhausted = true;
+              None
+            } else {
+              let context = request.view_screen();
+              let mut translated_parts = Vec::with_capacity(split_sentences.len());
+              let mut all_translated = true;
+              let mut any_missing = false;
+              for split_sentence in split_sentences {
+                visual_block::record_split_sentence(&split_sentence, &context);
+                let split_request = TranslationRequest::new(TranslationInput::visual_text_block {
+                  content: split_sentence,
+                  coordinate: origin,
+                  color_pair: sentence.color_pair(),
+                });
+                match translator::translation_status(&split_request) {
+                  translator::TranslationStatus::Translated(response) => translated_parts.push(response),
+                  translator::TranslationStatus::Pending => {
+                    all_translated = false;
+                  }
+                  translator::TranslationStatus::Missing => {
+                    all_translated = false;
+                    any_missing = true;
+                  }
+                }
+              }
+              if all_translated {
+                let mut combined = translated_parts.remove(0);
+                combined.translated = std::iter::once(combined.translated)
+                  .chain(translated_parts.into_iter().map(|response| response.translated))
+                  .collect();
+                Some(combined)
+              } else {
+                local_exhausted = any_missing;
+                None
+              }
+            }
+          }
+        }
+      };
+      if response.is_none()
+        && local_exhausted
+        && let Some(translated) = cloud_translation::get_or_submit(&sentence.original, sentence.is_complete())
+      {
+        response = Some(translation::TranslationResponse {
+          translated,
+          alignment: translation::TextAlignment::default(),
+        });
+      }
+      if let Some(response) = response {
         let text_block = if let Some(color_markup) = sentence.leading_color_markup() {
           let translated = if response.translated.starts_with("[C:") {
             response.translated
@@ -542,10 +659,10 @@ fn handle_help_mtb(string_ptr: *const ffi::c_void, bt: &str) -> bool {
             logging::log_text(&request, bt, string_ptr);
 
             // always sync the markup text box before rendering
-            if control::is_enabled() {
-              if let Some(response) = translator::translate(&request) {
-                markup = response.translated;
-              }
+            if control::is_enabled()
+              && let Some(response) = translator::translate(&request)
+            {
+              markup = response.translated;
             }
             markup::sync(&markup, address, control::is_enabled());
             let text_block = markup::get(&markup).text_block();
@@ -568,4 +685,31 @@ fn handle_help_mtb(string_ptr: *const ffi::c_void, bt: &str) -> bool {
 
   // use original rendering
   false
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn preference_composition_keeps_untranslated_parts_in_the_complete_block() {
+    let text = "Unib Olonasàs likes native gold, steel, banded agate, glumprong wood, giant gray squirrel bone, buckets and sloth bear men for their large floppy ears. When possible, he prefers to consume giant mongoose, bat ray, goat cheese, pearl millet beer and bitter melons. He absolutely detests lizards.";
+    let block = visual_block::split_preference_block(text).unwrap();
+    let translated = visual_block::compose_preference_block(&block, |part| match part {
+      "Unib Olonasàs likes" => Some("Unib Olonasàs喜欢".to_owned()),
+      "native gold" => Some("自然金".to_owned()),
+      "steel" => Some("钢".to_owned()),
+      "When possible" => Some("条件允许时".to_owned()),
+      "he prefers to consume" => Some("他更喜欢食用".to_owned()),
+      "giant mongoose" => Some("巨獴".to_owned()),
+      "He absolutely detests" => Some("他极其厌恶".to_owned()),
+      "lizards" => Some("蜥蜴".to_owned()),
+      _ => None,
+    });
+
+    assert_eq!(
+      translated,
+      "Unib Olonasàs喜欢自然金，钢，banded agate，glumprong wood，giant gray squirrel bone，buckets和sloth bear men for their large floppy ears。条件允许时，他更喜欢食用巨獴，bat ray，goat cheese，pearl millet beer和bitter melons。他极其厌恶蜥蜴。"
+    );
+  }
 }

@@ -215,7 +215,7 @@ end
 
 -- initialize the MOD
 function init()
-  native.init(native.OS, native.DF_PLATFORM, native.DF_VERSION, DISPLAYED_VERSION)
+  native.init(native.OS, native.DF_PLATFORM, native.DF_VERSION, DISPLAYED_VERSION, helpers.MOD_SOURCE_PATH)
 end
 
 -- reload the MOD data
@@ -240,6 +240,28 @@ end
 -- toggle the MOD between enabled and disabled
 function toggle()
   native.toggle()
+end
+
+-- enable or disable cloud translation for the current session
+function set_cloud_enabled(enabled)
+  if enabled then
+    native.cloud_enable()
+    p("cloud translation enabled.")
+  else
+    native.cloud_disable()
+    p("cloud translation disabled.")
+  end
+end
+
+-- set and persist the cloud translation endpoint
+function set_cloud_endpoint(host)
+  local endpoint, err = native.cloud_set_endpoint(host)
+  if not endpoint then
+    e("failed to set cloud translation endpoint: %s", err or "unknown error")
+    return false
+  end
+  p("cloud translation endpoint set to %s", endpoint)
+  return true
 end
 
 -- translate content synchronously

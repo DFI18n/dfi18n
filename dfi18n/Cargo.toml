@@ -28,10 +28,12 @@ indexmap = { workspace = true }
 libloading = { workspace = true }
 log = { workspace = true }
 regex = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 retour = { workspace = true }
 serde = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true }
+toml = { workspace = true }
 with_builtin_macros = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]

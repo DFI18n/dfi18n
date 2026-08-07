@@ -99,6 +99,7 @@ pub fn do_reset_if_requested() {
     text::reset();
     markup::reset();
     crate::visual_block::reset();
+    crate::cloud_translation::reload();
 
     log::info!("MOD state reset");
   }

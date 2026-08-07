@@ -2,6 +2,7 @@
 
 mod backtrace;
 mod cjk;
+mod cloud_translation;
 mod control;
 mod df;
 mod game;
@@ -45,7 +46,10 @@ extern "C" fn init(lua_state: *mut std::ffi::c_void) {
   let platform = lua::check_string(lua_state, 2);
   let version = lua::check_string(lua_state, 3);
   let mod_version = lua::check_string(lua_state, 4);
+  let mod_source_path = lua::check_string(lua_state, 5);
   game::set_game_info(os, platform, version, mod_version);
+
+  cloud_translation::load(std::path::Path::new(&mod_source_path).join("cloud-translation.toml"));
 
   log::info!("Initializing...");
   log::info!("Game version: {}", game::version());

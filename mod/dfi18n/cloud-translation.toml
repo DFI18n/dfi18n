@@ -1,0 +1,16 @@
+# 是否启用云端翻译。
+enabled = false
+
+# 云端翻译服务接口。使用前填写完整的 HTTP(S) 地址。
+endpoint = ""
+
+# 只有本地完整匹配和拆句匹配均失败，并满足以下条件时才会提交任务。
+min_words = 3
+max_characters = 2000
+require_terminal_punctuation = true
+allow_quoted_text = true
+
+# HTTP 请求限制。
+max_concurrent_requests = 4
+request_timeout_seconds = 30
+failure_retry_seconds = 300

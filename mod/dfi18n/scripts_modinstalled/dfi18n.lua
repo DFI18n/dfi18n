@@ -14,6 +14,22 @@ local function dfi18n(args)
     mod.toggle()
   elseif action == "reload" then
     mod.reload()
+  elseif action == "cloud" then
+    local cloud_action = args[2]
+    if cloud_action == "enable" then
+      mod.set_cloud_enabled(true)
+    elseif cloud_action == "disable" then
+      mod.set_cloud_enabled(false)
+    elseif cloud_action == "set" then
+      local host = args[3]
+      if not host then
+        print("Usage: dfi18n cloud set <host-or-endpoint>")
+        return
+      end
+      mod.set_cloud_endpoint(host)
+    else
+      print("Usage: dfi18n cloud [enable|disable|set <host-or-endpoint>]")
+    end
   elseif action == "change" then
     local lang_tag = args[2]
     if not lang_tag then
@@ -32,7 +48,7 @@ local function dfi18n(args)
     local translated = mod.async_translate(original)
     print(translated)
   else
-    print("Usage: dfi18n [enable|disable|toggle|reload|change]")
+    print("Usage: dfi18n [enable|disable|toggle|reload|cloud|change]")
   end
 end
 

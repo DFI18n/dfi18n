@@ -6,6 +6,45 @@ DFI18n is a translation mod for Dwarf Fortress.
 
 This mod relies on data files provided by community translators to function.
 
+## Runtime Localization Pipeline
+
+DFI18n captures ordinary and colored text fragments, reconstructs them into visual text blocks, and then derives sentence-level translation requests. This allows wrapped, multi-line, and dynamically assembled text to be translated and redrawn over its complete source rectangle.
+
+The runtime attempts local full-text matches first, followed by sentence-level matching and fragment fallback. Character preference summaries receive specialized handling: `likes`, `prefers to consume`, and `absolutely detests` sections are split into independently translatable prefixes and list items. Unmatched preference parts remain in English so the complete text block can still be rendered without losing content.
+
+## Translation Diagnostics
+
+Recognized and unmatched runtime text is written under `Dwarf Fortress/dfi18n-data/logs`:
+
+*   `sentences.csv` contains reconstructed complete sentences.
+*   `split-sentences.csv` contains sentence-level requests produced from larger visual blocks.
+*   `unmatched.csv` contains text that did not match local translation data.
+
+`df_matcher.exe` can test the same local matching and preference-specialization logic outside the game. Place it in the root of a complete `dfi18n-data` directory and run:
+
+```text
+df_matcher.exe "A complete sentence to test."
+```
+
+It prints the translated result when a match is found. Specialized preference blocks may contain both translated and original parts when only some components match.
+
+## Optional Cloud Translation
+
+Cloud translation is disabled by default, and the client does not contain a hard-coded service address. Configure it from the DFHack console:
+
+```text
+dfi18n cloud set translate.example.com
+dfi18n cloud enable
+```
+
+The `set` command also accepts a complete HTTP or HTTPS endpoint. A bare host is normalized to `https://<host>/v1/translate` and persisted to `cloud-translation.toml`. Disable cloud requests for the current session with:
+
+```text
+dfi18n cloud disable
+```
+
+The optional self-hosted service is documented in [translation-server/README.md](translation-server/README.md). API credentials and prompts remain on the server; the game client only submits eligible text.
+
 ## Supported Versions
 
 This mod has been tested with [Dwarf Fortress 53.08 from Steam](https://store.steampowered.com/app/975370/Dwarf_Fortress/) (on both Windows and Linux). It may also work with the Itch or Classic versions, but this is not guaranteed.
@@ -29,8 +68,7 @@ This mod has been tested with [Dwarf Fortress 53.08 from Steam](https://store.st
 *   Tabs are not rendered with the correct width.
 *   Some texts remain untranslated (if not yet covered by community translations).
 *   Abbreviated text (e.g., `Cow` -> `Cw`) or text ending with ellipsis (`...`) will not translate correctly.
-*   Multi-line colored text is not handled properly.
-*   Most markup text is not yet supported (only Help text is currently supported).
+*   Some markup-heavy screens may still fall back to their original rendering.
 *   Hot-reloading translation data files may cause rendering issues.
 *   Windows backtrace frames may not show accurate memory addresses.
 

@@ -213,7 +213,7 @@ impl VisualRow {
 }
 
 fn ends_complete_sentence(text: &str) -> bool {
-  let text = text.trim_end();
+  let text = text.trim_end().trim_end_matches(['"', '\'', ')', ']', '}', '”', '’']);
   !text.ends_with("...") && text.ends_with(['.', '!', '?'])
 }
 
@@ -306,9 +306,14 @@ impl SentenceRecorder {
 }
 
 static SENTENCE_RECORDER: OnceLock<Mutex<Option<SentenceRecorder>>> = OnceLock::new();
+static SPLIT_SENTENCE_RECORDER: OnceLock<Mutex<Option<SentenceRecorder>>> = OnceLock::new();
 
 fn sentence_path() -> PathBuf {
   Path::new(DATA_DIRECTORY).join("logs").join("sentences.csv")
+}
+
+fn split_sentence_path() -> PathBuf {
+  Path::new(DATA_DIRECTORY).join("logs").join("split-sentences.csv")
 }
 
 pub fn record_sentence(text: &str, context: &str) {
@@ -326,6 +331,26 @@ pub fn record_sentence(text: &str, context: &str) {
     log::error!("failed to record sentence: {error:#}");
   }
 }
+
+pub fn record_split_sentence(text: &str, context: &str) {
+  let recorder = SPLIT_SENTENCE_RECORDER.get_or_init(|| match SentenceRecorder::open(&split_sentence_path()) {
+    Ok(recorder) => Mutex::new(Some(recorder)),
+    Err(error) => {
+      log::error!("failed to open split sentence log: {error:#}");
+      Mutex::new(None)
+    }
+  });
+  let mut recorder = recorder.lock().unwrap();
+  if let Some(recorder) = recorder.as_mut()
+    && let Err(error) = recorder.record(text, context)
+  {
+    log::error!("failed to record split sentence: {error:#}");
+  }
+}
+
+pub use rule_based_translator::{
+  PreferenceBlock, compose_preference_block, split_preference_block, split_semantic_sentences,
+};
 
 static ACTIVE_COLLECTOR: OnceLock<Mutex<Option<Collector>>> = OnceLock::new();
 
@@ -553,6 +578,78 @@ mod tests {
     assert_eq!(blocks.len(), 2);
     assert_eq!(blocks[0].original, "Left first left second.");
     assert_eq!(blocks[1].original, "Right first right second.");
+  }
+
+  #[test]
+  fn splits_multiple_semantic_sentences_without_splitting_ellipsis() {
+    assert_eq!(
+      split_semantic_sentences("She is calm. She needs help! Does she?"),
+      ["She is calm.", "She needs help!", "Does she?"]
+    );
+    assert_eq!(
+      split_semantic_sentences("Loading... Please wait."),
+      ["Loading... Please wait."]
+    );
+  }
+
+  #[test]
+  fn splits_a_complete_preference_block_into_a_likes_prefix_and_items() {
+    let text = "Unib Olonasàs likes native gold, steel, banded agate, glumprong wood, giant gray squirrel bone, buckets and sloth bear men for their large floppy ears. When possible, he prefers to consume giant mongoose, bat ray, goat cheese, pearl millet beer and bitter melons. He absolutely detests lizards.";
+    let block = split_preference_block(text).unwrap();
+
+    assert_eq!(block.sections.len(), 3);
+    assert_eq!(block.sections[0].prefixes, ["Unib Olonasàs likes"]);
+    assert_eq!(
+      block.sections[0].items,
+      [
+        "native gold",
+        "steel",
+        "banded agate",
+        "glumprong wood",
+        "giant gray squirrel bone",
+        "buckets",
+        "sloth bear men for their large floppy ears"
+      ]
+    );
+    assert!(block.sections[0].join_last_with_and);
+    assert_eq!(block.sections[1].prefixes, ["When possible", "he prefers to consume"]);
+    assert_eq!(
+      block.sections[1].items,
+      [
+        "giant mongoose",
+        "bat ray",
+        "goat cheese",
+        "pearl millet beer",
+        "bitter melons"
+      ]
+    );
+    assert!(block.sections[1].join_last_with_and);
+    assert_eq!(block.sections[2].prefixes, ["He absolutely detests"]);
+    assert_eq!(block.sections[2].items, ["lizards"]);
+  }
+
+  #[test]
+  fn does_not_specialize_an_ordinary_pronoun_likes_sentence() {
+    let text =
+      "She likes to keep things practical, without delving too deeply into the abstract. She is quite ambitious.";
+    assert!(split_preference_block(text).is_none());
+  }
+
+  #[test]
+  fn keeps_closing_quotes_with_the_split_sentence() {
+    assert_eq!(
+      split_semantic_sentences("He said \"Go.\" She left."),
+      ["He said \"Go.\"", "She left."]
+    );
+  }
+
+  #[test]
+  fn recognizes_terminal_punctuation_before_a_closing_quote() {
+    let mut collector = Collector::default();
+    collector.push(fragment(2, 3, "He said \"This is a complete sentence.\""));
+
+    let sentence = collector.finish().pop().unwrap().into_sentences().pop().unwrap();
+    assert!(sentence.is_complete());
   }
 
   #[test]
