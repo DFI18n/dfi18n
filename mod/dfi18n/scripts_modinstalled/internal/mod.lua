@@ -246,11 +246,24 @@ end
 function set_cloud_enabled(enabled)
   if enabled then
     native.cloud_enable()
-    p("cloud translation enabled.")
   else
     native.cloud_disable()
+  end
+
+  local active, configured = native.cloud_get_status()
+  if active then
+    p("cloud translation enabled.")
+  elseif enabled and not configured then
+    e("cloud translation cannot be enabled because no service endpoint is configured.")
+  else
     p("cloud translation disabled.")
   end
+  return active, configured
+end
+
+-- return whether cloud translation is enabled and has a usable endpoint
+function get_cloud_status()
+  return native.cloud_get_status()
 end
 
 -- set and persist the cloud translation endpoint

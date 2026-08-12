@@ -10,8 +10,8 @@ use sdl2_sys as sdl;
 
 use crate::types::{ColorPair, DFHackPen};
 use crate::{
-  cloud_translation, control, df, glyph, lang, logging, logo, markup, memory, screen, text, translation, translator,
-  types, visual_block,
+  cloud_translation, control, df, lang, logging, logo, markup, memory, screen, text, translation, translator, types,
+  visual_block,
 };
 use translation::{TranslationInput, TranslationRequest};
 
@@ -244,35 +244,6 @@ fn update_tile(renderer_ptr: *const ffi::c_void, x: i32, y: i32) {
   for (id, coordinate, text_block) in screen::get_text_blocks(screen::Layer::Lower) {
     text_block.render(&sdl_renderer, &coordinate, screen::Layer::Lower, id);
   }
-
-  if df::view_screen::get_view_screen().starts_with("::t::initial_prep::title") {
-    render_menu_version_badge(&sdl_renderer);
-  }
-}
-
-fn render_menu_version_badge(renderer: &sdl::Renderer<'static>) {
-  const LABEL: &[u8] = b"DFI18N v2";
-  const COLOR: (u8, u8, u8) = (160, 160, 160);
-
-  let renderer_info = df::renderer::get_renderer_info();
-  let origin = renderer_info.origin_offset();
-  let canvas = renderer_info.canvas_size();
-  let cell = renderer_info.zoom_size();
-  let label_width = LABEL.len() as i32 * cell.width;
-  let start_x = origin.column + (canvas.width - label_width - cell.width).max(0);
-  let y = origin.row + (canvas.height - cell.height * 2).max(0);
-
-  for (index, codepoint) in LABEL.iter().copied().enumerate() {
-    let texture = glyph::get_curses_glyph_texture(renderer, codepoint);
-    texture.set_color_mod(COLOR.0, COLOR.1, COLOR.2);
-    let rect = sdl::SDL_Rect {
-      x: start_x + index as i32 * cell.width,
-      y,
-      w: cell.width,
-      h: cell.height,
-    };
-    renderer.copy(&texture, None, Some(&rect));
-  }
 }
 
 static DISPLAY_TITLE: OnceLock<Mutex<Option<sdl::Texture<'static>>>> = OnceLock::new();
@@ -401,7 +372,7 @@ fn translate_preference_component(
     coordinate: origin,
     color_pair,
   });
-  match translator::translation_status(&request) {
+  match translator::translation_status_rules_first(&request) {
     translator::TranslationStatus::Translated(response) => Some(response.translated),
     translator::TranslationStatus::Pending | translator::TranslationStatus::Missing => None,
   }
@@ -525,7 +496,12 @@ fn render_things() {
           translated_markup.set_width(sentence.columns() as i32);
           translated_markup.text_block()
         } else {
-          text::TextBlock::from_visual_translation(response.translated, sentence.color_pair(), sentence.columns())
+          text::TextBlock::from_visual_translation(
+            response.translated,
+            sentence.color_pair(),
+            sentence.columns(),
+            response.alignment,
+          )
         };
         let id = text_block.add_to_screen(screen::Layer::Lower, origin);
         screen::mark_source_region(
@@ -557,9 +533,12 @@ fn render_things() {
           };
           let columns = fragment.text.chars().count().max(1);
           let text_block = match &fragment.source {
-            visual_block::FragmentSource::Addst => {
-              text::TextBlock::from_visual_translation(response.translated, fragment.color_pair, columns)
-            }
+            visual_block::FragmentSource::Addst => text::TextBlock::from_visual_translation(
+              response.translated,
+              fragment.color_pair,
+              columns,
+              response.alignment,
+            ),
             visual_block::FragmentSource::AddColoredSt { .. } => {
               let mut translated_markup = markup::get(&response.translated);
               translated_markup.set_width(columns as i32);

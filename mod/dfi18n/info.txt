@@ -1,6 +1,6 @@
 [ID:dfi18n]
-[NUMERIC_VERSION:17]
-[DISPLAYED_VERSION:0.2.1]
+[NUMERIC_VERSION:18]
+[DISPLAYED_VERSION:0.2.2]
 [EARLIEST_COMPATIBLE_NUMERIC_VERSION:1]
 [EARLIEST_COMPATIBLE_DISPLAYED_VERSION:0.0.1]
 [AUTHOR:Viz]
@@ -8,7 +8,7 @@
 [DESCRIPTION:Translation Mod for Dwarf Fortress.]
 
 [STEAM_TITLE:DFI18n]
-[STEAM_DESCRIPTION:Translation Mod for Dwarf Fortress. Beta version.]
 [STEAM_TAG:dfhack]
+[STEAM_CHANGELOG:DFI18N v0.2.2：新增运行时句子与多行文本块汉化；改进富文本、偏好描述和本地规则匹配；加入未匹配句子记录与 df_matcher；加入可选云端 AI 翻译，已预置腾讯云服务接口但默认关闭。]
 
 [STEAM_FILE_ID:3613958631]

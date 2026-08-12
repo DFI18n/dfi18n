@@ -16,6 +16,7 @@ impl Replacer for ItemDesignationReplacer {
     text: &str,
     translator: &Translator,
     level: usize,
+    _hint: ReplacerMatchHint<'_>,
   ) -> Vec<ResultTree> {
     let reference = super::to_canonical_identifier(config, base_namespace);
     let mut results = Vec::new();
@@ -36,8 +37,20 @@ impl Replacer for ItemDesignationReplacer {
         let remaining = remaining.to_owned();
         let mut children = IndexMap::new();
         children.insert("item".to_owned(), result_tree);
+        let composed_tokens = vec![
+          Token::Literal(prefix.to_owned()),
+          Token::Reference("item".to_owned()),
+          Token::Literal(suffix.to_owned()),
+        ];
         results.push(ResultTree::new(
-          identifier, original, matched, translated, remaining, children,
+          identifier,
+          original,
+          matched,
+          translated,
+          remaining,
+          children,
+          composed_tokens.clone(),
+          composed_tokens,
         ));
       }
     }

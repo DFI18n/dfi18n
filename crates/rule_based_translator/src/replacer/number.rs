@@ -16,6 +16,7 @@ impl Replacer for NumberReplacer {
     text: &str,
     _translator: &Translator,
     _level: usize,
+    _hint: ReplacerMatchHint<'_>,
   ) -> Vec<ResultTree> {
     let mut results = Vec::new();
     let mut matched = String::new();
@@ -36,7 +37,14 @@ impl Replacer for NumberReplacer {
       let remaining = text[matched.len()..].to_owned();
       let children = IndexMap::new();
       results.push(ResultTree::new(
-        identifier, original, matched, translated, remaining, children,
+        identifier,
+        original,
+        matched,
+        translated,
+        remaining,
+        children,
+        Vec::new(),
+        Vec::new(),
       ));
     }
     results

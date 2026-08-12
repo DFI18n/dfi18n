@@ -155,6 +155,18 @@ fn append_prefix_item(output: &mut String, item: &str) {
   output.push_str(item);
 }
 
+fn translate_prefix(prefix: &str, translate: &mut impl FnMut(&str) -> Option<String>) -> Option<String> {
+  if let Some(translated) = translate(prefix) {
+    return Some(translated);
+  }
+
+  let subject = prefix.strip_suffix(" likes")?;
+  let translated_likes = translate("likes")?;
+  let mut translated = subject.to_owned();
+  append_prefix_item(&mut translated, &translated_likes);
+  Some(translated)
+}
+
 pub fn preference_section_source(section: &PreferenceSection) -> String {
   let mut source = section.prefixes.join(", ");
   for (index, item) in section.items.iter().enumerate() {
@@ -180,7 +192,7 @@ pub fn compose_preference_block(block: &PreferenceBlock, mut translate: impl FnM
       if !translated_section.is_empty() {
         translated_section.push('，');
       }
-      let translated_prefix = translate(prefix);
+      let translated_prefix = translate_prefix(prefix, &mut translate);
       final_prefix_was_translated = translated_prefix.is_some();
       translated_section.push_str(&translated_prefix.unwrap_or_else(|| prefix.clone()));
     }
@@ -255,5 +267,21 @@ mod tests {
     assert!(translated.contains("When possible，he prefers to consume giant mongoose"));
     assert!(translated.contains("pearl millet beer和bitter melons"));
     assert!(translated.ends_with("他极其厌恶蜥蜴。"));
+  }
+
+  #[test]
+  fn translates_the_likes_suffix_without_translating_the_subject() {
+    let block = split_preference_block(SAMPLE).unwrap();
+    let translated = compose_preference_block(&block, |part| match part {
+      "likes" => Some("喜欢".to_owned()),
+      "When possible" => Some("条件允许时".to_owned()),
+      "he prefers to consume" => Some("他更喜欢食用".to_owned()),
+      "He absolutely detests" => Some("他极其厌恶".to_owned()),
+      _ => None,
+    });
+
+    assert!(translated.starts_with("Unib Olonasàs喜欢native gold"));
+    assert!(translated.contains("条件允许时，他更喜欢食用giant mongoose"));
+    assert!(translated.ends_with("他极其厌恶lizards。"));
   }
 }

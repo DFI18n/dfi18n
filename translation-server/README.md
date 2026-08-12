@@ -1,6 +1,67 @@
-# DFI18N 腾讯云翻译服务
+# DFI18N 翻译服务
 
-部署在腾讯云轻量应用服务器上的《矮人要塞》翻译后端。客户端只提交英文文本；Prompt、DeepSeek 密钥和翻译缓存都保留在服务器端。
+《矮人要塞》汉化使用的可选翻译后端。客户端只提交英文文本；Prompt、上游 API 密钥和翻译缓存都保留在服务器端。
+
+## 本机部署
+
+需要 Node.js 22。进入 `translation-server` 目录后安装依赖并创建配置：
+
+```powershell
+npm ci
+Copy-Item .env.example .env
+```
+
+编辑 `.env`，至少设置以下内容：
+
+```dotenv
+UPSTREAM_API_KEY=你的上游API密钥
+UPSTREAM_BASE_URL=https://api.deepseek.com
+UPSTREAM_MODEL=deepseek-v4-pro
+CLIENT_HEADER_VALUE=dfi18n-runtime-v1
+DATABASE_PATH=./data/translations.sqlite3
+PORT=3000
+```
+
+构建并启动服务：
+
+```powershell
+npm run build
+npm start
+```
+
+检查服务是否正常：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:3000/health
+```
+
+测试翻译接口：
+
+```powershell
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:3000/v1/translate `
+  -Headers @{"X-DFI18N-Client"="dfi18n-runtime-v1"} `
+  -ContentType "application/json" `
+  -Body '{"text":"He is quick to anger."}'
+```
+
+随后在 DFHack 控制台中切换到本机服务并启用云端翻译：
+
+```text
+dfi18n cloud set http://127.0.0.1:3000/v1/translate
+dfi18n cloud enable
+```
+
+服务地址和启用状态会写入 Mod 目录下的 `cloud-translation.toml`。切换到其他服务器时可输入完整接口地址，或者只输入域名：
+
+```text
+dfi18n cloud set https://translate.example.com/v1/translate
+dfi18n cloud set translate.example.com
+dfi18n cloud disable
+```
+
+只输入域名时，客户端会自动使用 `https://<域名>/v1/translate`。
 
 ## 腾讯云部署
 

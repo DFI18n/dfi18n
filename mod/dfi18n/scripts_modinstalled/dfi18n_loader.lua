@@ -22,5 +22,11 @@ mod.enable()
 -- setup hooks on DFHack
 mod.setup_hooks()
 
+-- discover the title-screen cloud translation switch
+local overlay_ok, overlay = pcall(require, 'plugins.overlay')
+if overlay_ok then
+  overlay.rescan()
+end
+
 -- done
 mod.p("has been enabled.")

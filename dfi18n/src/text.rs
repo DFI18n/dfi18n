@@ -178,7 +178,12 @@ impl TextBlock {
     }
   }
 
-  pub fn from_visual_translation(content: String, color_pair: types::ColorPair, columns: usize) -> Self {
+  pub fn from_visual_translation(
+    content: String,
+    color_pair: types::ColorPair,
+    columns: usize,
+    alignment: translation::TextAlignment,
+  ) -> Self {
     let columns = columns.max(1);
     let max_width = columns as i32 * df::renderer::get_renderer_info().orig_size().width;
     let mut rows = Vec::new();
@@ -211,10 +216,9 @@ impl TextBlock {
       rows.push(row);
     }
 
-    Self {
-      rows,
-      layout: TextLayout::new(columns),
-    }
+    let mut layout = TextLayout::new(columns);
+    layout.set_alignment(alignment);
+    Self { rows, layout }
   }
 
   // Get a TextBlock from original text without translation

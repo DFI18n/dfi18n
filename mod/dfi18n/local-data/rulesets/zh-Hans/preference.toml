@@ -1,0 +1,15 @@
+base = "preference"
+
+[[rulesets]]
+[rulesets.rules]
+"{::name} likes" = "{::name}喜欢"
+"likes" = "喜欢"
+"When possible" = "条件允许时"
+"he prefers to consume" = "他更喜欢食用"
+"she prefers to consume" = "她更喜欢食用"
+"it prefers to consume" = "它更喜欢食用"
+"they prefer to consume" = "他们更喜欢食用"
+"He absolutely detests" = "他极其厌恶"
+"She absolutely detests" = "她极其厌恶"
+"It absolutely detests" = "它极其厌恶"
+"They absolutely detest" = "他们极其厌恶"

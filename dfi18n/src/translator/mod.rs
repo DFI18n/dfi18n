@@ -62,12 +62,24 @@ pub enum TranslationStatus {
 }
 
 pub fn translation_status(request: &translation::TranslationRequest) -> TranslationStatus {
+  translation_status_with_order(request, false)
+}
+
+pub fn translation_status_rules_first(request: &translation::TranslationRequest) -> TranslationStatus {
+  translation_status_with_order(request, true)
+}
+
+fn translation_status_with_order(request: &translation::TranslationRequest, rules_first: bool) -> TranslationStatus {
   let lang_tag = lang::current_lang_tag();
 
   let mut caches = get_caches_mut();
   let cache = caches.entry(lang_tag).or_default();
-  let key = request.key();
-  if let Some(cached) = cache.get(key) {
+  let key = if rules_first {
+    format!("rules-first/{}", request.key())
+  } else {
+    request.key().to_owned()
+  };
+  if let Some(cached) = cache.get(&key) {
     return match cached {
       TranslationCacheEntry::Pending => TranslationStatus::Pending,
       TranslationCacheEntry::Resolved(Some(response)) => TranslationStatus::Translated(response.clone()),
@@ -75,10 +87,10 @@ pub fn translation_status(request: &translation::TranslationRequest) -> Translat
     };
   }
   // Insert a placeholder to indicate this request is being processed.
-  cache.insert(key.to_owned(), TranslationCacheEntry::Pending);
+  cache.insert(key, TranslationCacheEntry::Pending);
 
   // spawn a task to perform the translation
-  tasks::spawn(translate_task(request.clone()));
+  tasks::spawn(translate_task_with_order(request.clone(), rules_first));
 
   // return no translation for now
   TranslationStatus::Pending
@@ -86,12 +98,25 @@ pub fn translation_status(request: &translation::TranslationRequest) -> Translat
 
 // The translation task that performs the actual translation
 pub async fn translate_task(request: translation::TranslationRequest) {
+  translate_task_with_order(request, false).await;
+}
+
+async fn translate_task_with_order(request: translation::TranslationRequest, rules_first: bool) {
   let lang_tag = lang::current_lang_tag();
 
-  let response = do_translate(&request);
+  let response = if rules_first {
+    do_translate_rules_first(&request)
+  } else {
+    do_translate(&request)
+  };
   let mut caches = get_caches_mut();
   let cache = caches.entry(lang_tag).or_default();
-  cache.insert(request.key().to_owned(), TranslationCacheEntry::Resolved(response));
+  let key = if rules_first {
+    format!("rules-first/{}", request.key())
+  } else {
+    request.key().to_owned()
+  };
+  cache.insert(key, TranslationCacheEntry::Resolved(response));
 }
 
 // Perform the actual translation using different methods
@@ -116,6 +141,11 @@ pub fn do_translate(request: &translation::TranslationRequest) -> Option<transla
 
   // chain translation methods
   simple::translate(&lang_tag, request.context()).or_else(|| rulesets::translate(&lang_tag, request.context()))
+}
+
+fn do_translate_rules_first(request: &translation::TranslationRequest) -> Option<translation::TranslationResponse> {
+  let lang_tag = lang::current_lang_tag();
+  rulesets::translate(&lang_tag, request.context()).or_else(|| simple::translate(&lang_tag, request.context()))
 }
 
 // Synchronous translation function called from Lua (will not use cache)

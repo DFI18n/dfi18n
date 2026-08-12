@@ -4,6 +4,16 @@ use crate::*;
 
 mod item_designation;
 mod number;
+mod wildcard;
+
+pub const MAX_WILDCARD_CANDIDATES: usize = 64;
+pub const MAX_WILDCARD_CAPTURE_BYTES: usize = 4096;
+
+#[derive(Clone, Copy, Default)]
+pub struct ReplacerMatchHint<'a> {
+  pub next_literal: Option<&'a str>,
+  pub terminal: bool,
+}
 
 // Replacer trait for programmatically match and replace
 pub trait Replacer {
@@ -16,6 +26,7 @@ pub trait Replacer {
     text: &str,
     translator: &Translator,
     level: usize,
+    hint: ReplacerMatchHint<'_>,
   ) -> Vec<ResultTree>;
 }
 
@@ -45,4 +56,6 @@ pub fn register_default_replacers() {
     Box::new(item_designation::ItemDesignationReplacer::default()),
   );
   register_replacer("number", Box::new(number::NumberReplacer::default()));
+  register_replacer("word", Box::new(wildcard::WordReplacer::default()));
+  register_replacer("any", Box::new(wildcard::AnyReplacer::default()));
 }

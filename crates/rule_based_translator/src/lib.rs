@@ -1,5 +1,6 @@
 use anyhow::{Context as _, Result, anyhow};
-use std::collections::BTreeSet;
+use std::cmp::Reverse;
+use std::collections::{BTreeSet, HashMap};
 use std::{fs, path, sync::OnceLock};
 
 use indexmap::IndexMap;
@@ -9,6 +10,8 @@ mod replacer;
 pub use replacer::*;
 mod preference;
 pub use preference::*;
+
+const MAX_CAPTURE_DEPTH: usize = 4;
 
 // A rule-based translator
 #[derive(Debug, Default)]
@@ -31,17 +34,23 @@ impl Translator {
   // Translate text using the rulesets, returning the best match if any
   pub fn translate(&self, text: &str) -> Option<String> {
     let results = self.get_all_translations(text, false);
-    results.into_iter().min_by_key(|result| result.weight()).map(|result| result.translated)
+    results.into_iter().min_by_key(ResultTree::specificity).map(|result| result.translated)
   }
 
   // Get all translation results for the given text, for debugging purposes
   pub fn get_all_translations(&self, text: &str, partial_match: bool) -> Vec<ResultTree> {
     let mut context = Context::default();
     let results = self.do_translate(&mut context, text, "::", 0);
-    if partial_match {
-      return results;
+    let mut results = if partial_match {
+      results
+    } else {
+      results.into_iter().filter(|result| result.remaining.is_empty()).collect()
+    };
+    for result in results.iter_mut().filter(|result| result.remaining.is_empty()) {
+      let mut capture_path = vec![result.matched.clone()];
+      *result = self.resolve_captures(&mut context, result.clone(), 0, &mut capture_path);
     }
-    results.into_iter().filter(|result| result.remaining.len() == 0).collect()
+    results
   }
 
   // Internal recursive function to translate text using a specific ruleset
@@ -50,26 +59,7 @@ impl Translator {
 
     // handle replacer references
     if identifier.starts_with("%") {
-      let parts: Vec<&str> = identifier[1..].splitn(3, ':').collect();
-      if parts.len() < 2 {
-        log::error!("Invalid replacer identifier format: {identifier:?}");
-        return Vec::new();
-      }
-      let name = parts[0];
-      let base_namespace = parts[1];
-      let config = parts.get(2).cloned().unwrap_or("");
-
-      let replacers = replacer::get_replacers();
-      let replacer = match replacers.get(name) {
-        Some(r) => r,
-        None => {
-          log::error!("Replacer {name:?} not found for identifier {identifier:?}");
-          return Vec::new();
-        }
-      };
-
-      log::trace!("{indent}Using replacer {name} with config {config:?} on text {text:?}...");
-      return replacer.replace(context, identifier, base_namespace, config, text, self, level + 1);
+      return self.do_replace(context, text, identifier, level, ReplacerMatchHint::default());
     }
 
     // track the identifier path to detect cycles (do not track replacer references)
@@ -79,13 +69,16 @@ impl Translator {
 
     // for each rule in the ruleset identified by the identifier
     log::trace!("{indent}Translate {text:?} using ruleset {identifier:?}...");
-    for (original, translated) in self.rulesets.get(identifier).expect(&format!("ruleset {identifier:?} not found")) {
+    for (original, translated_tokens) in
+      self.rulesets.get(identifier).expect(&format!("ruleset {identifier:?} not found"))
+    {
       // start matching from the beginning of the text
       let first_candidate = Candidate::new(IndexMap::new(), text);
       let mut candidates = vec![first_candidate];
 
       // for each token in the original rule
-      for token in original {
+      let has_wildcard = original.iter().any(is_wildcard_token);
+      for (token_index, token) in original.iter().enumerate() {
         // break when no candidates left
         if candidates.is_empty() {
           break;
@@ -123,7 +116,19 @@ impl Translator {
               }
 
               // recursively translate the candidate's remaining text using the referenced ruleset
-              let result_trees = self.do_translate(context, &candidate.remaining, reference, level + 1);
+              let result_trees = if reference.starts_with('%') {
+                let next_literal = original.get(token_index + 1).and_then(|token| match token {
+                  Token::Literal(literal) if !literal.is_empty() => Some(literal.as_str()),
+                  _ => None,
+                });
+                let hint = ReplacerMatchHint {
+                  next_literal,
+                  terminal: token_index + 1 == original.len(),
+                };
+                self.do_replace(context, &candidate.remaining, reference, level + 1, hint)
+              } else {
+                self.do_translate(context, &candidate.remaining, reference, level + 1)
+              };
 
               context.cyclic_rules.remove(&rule_node);
 
@@ -140,6 +145,9 @@ impl Translator {
         }
 
         // advance to next set of candidates
+        if has_wildcard && next_candidates.len() > MAX_WILDCARD_CANDIDATES {
+          next_candidates.truncate(MAX_WILDCARD_CANDIDATES);
+        }
         candidates = next_candidates;
       }
 
@@ -152,6 +160,7 @@ impl Translator {
         let remaining = candidate.remaining.to_owned();
         // getting children from the candidate
         let children = candidate.results;
+        let match_tokens = original.clone();
         // constructing original token string
         let original = {
           let mut joined = String::new();
@@ -170,7 +179,7 @@ impl Translator {
         // constructing translated string after replacing references with their translated text
         let translated = {
           let mut replaced = String::new();
-          for token in translated {
+          for token in translated_tokens {
             match token {
               Token::Literal(literal) => {
                 replaced.push_str(literal);
@@ -188,7 +197,14 @@ impl Translator {
 
         // append the result tree
         results.push(ResultTree::new(
-          identifier, original, matched, translated, remaining, children,
+          identifier,
+          original,
+          matched,
+          translated,
+          remaining,
+          children,
+          match_tokens,
+          translated_tokens.clone(),
         ));
       }
     }
@@ -214,6 +230,75 @@ impl Translator {
     context.identifier_path.pop();
 
     results
+  }
+
+  fn do_replace(
+    &self,
+    context: &mut Context,
+    text: &str,
+    identifier: &str,
+    level: usize,
+    hint: ReplacerMatchHint<'_>,
+  ) -> Vec<ResultTree> {
+    let parts: Vec<&str> = identifier[1..].splitn(3, ':').collect();
+    if parts.len() < 2 {
+      log::error!("Invalid replacer identifier format: {identifier:?}");
+      return Vec::new();
+    }
+    let name = parts[0];
+    let base_namespace = parts[1];
+    let config = parts.get(2).copied().unwrap_or("");
+    let replacers = replacer::get_replacers();
+    let Some(replacer) = replacers.get(name) else {
+      log::error!("Replacer {name:?} not found for identifier {identifier:?}");
+      return Vec::new();
+    };
+    log::trace!(
+      "{}Using replacer {name} with config {config:?} on text {text:?}...",
+      "  ".repeat(level)
+    );
+    replacer.replace(context, identifier, base_namespace, config, text, self, level + 1, hint)
+  }
+
+  fn resolve_captures(
+    &self,
+    context: &mut Context,
+    mut result: ResultTree,
+    depth: usize,
+    capture_path: &mut Vec<String>,
+  ) -> ResultTree {
+    if is_translatable_wildcard(&result.identifier) {
+      let key = (result.matched.clone(), depth);
+      if let Some(cached) = context.capture_cache.get(&key) {
+        result.translated = cached.clone().unwrap_or_else(|| result.matched.clone());
+        return result;
+      }
+      if depth >= MAX_CAPTURE_DEPTH || capture_path.contains(&result.matched) {
+        result.translated = result.matched.clone();
+        context.capture_cache.insert(key, None);
+        return result;
+      }
+
+      capture_path.push(result.matched.clone());
+      let inner = self
+        .do_translate(context, &result.matched, "::", 0)
+        .into_iter()
+        .filter(|candidate| candidate.remaining.is_empty())
+        .min_by_key(ResultTree::specificity)
+        .map(|candidate| self.resolve_captures(context, candidate, depth + 1, capture_path));
+      capture_path.pop();
+      result.translated = inner.map(|inner| inner.translated).unwrap_or_else(|| result.matched.clone());
+      context.capture_cache.insert(key, Some(result.translated.clone()));
+      return result;
+    }
+
+    for child in result.children.values_mut() {
+      *child = self.resolve_captures(context, child.clone(), depth, capture_path);
+    }
+    if !result.translation_tokens.is_empty() {
+      result.translated = compose_translation(&result.translation_tokens, &result.children, &result.identifier);
+    }
+    result
   }
 
   // Parse all ruleset files in a directory
@@ -321,6 +406,9 @@ impl Translator {
         let translated_tokens = parse_tokens(&base_namespace, &translated).context(format!(
           "failed to parse the translated entry {translated:?} in ruleset {identifier:?}"
         ))?;
+        validate_wildcard_layout(&original_tokens).context(format!(
+          "unsafe wildcard layout in original entry {original:?} in ruleset {identifier:?}"
+        ))?;
 
         // ensure no duplicate reference tokens in the original entry
         let original_reference_tokens: Vec<String> = original_tokens
@@ -365,7 +453,14 @@ impl Translator {
       for (original_tokens, _) in ruleset {
         for token in original_tokens {
           if let Token::Reference(reference) = token {
-            if !reference.starts_with("%") && !self.rulesets.contains_key(reference) {
+            if reference.starts_with('%') {
+              let name = replacer_name(reference).unwrap_or_default();
+              if !replacer::get_replacers().contains_key(name) {
+                return Err(anyhow!(
+                  "In ruleset {ruleset_name:?}, replacer {name:?} is not registered for reference {reference:?}"
+                ));
+              }
+            } else if !self.rulesets.contains_key(reference) {
               return Err(anyhow!(
                 "In ruleset {ruleset_name:?}, reference {reference:?} not found for original tokens {original_tokens:?}"
               ));
@@ -399,6 +494,61 @@ pub enum Token {
   Literal(String),
   // A reference to another RuleSet by its identifier
   Reference(String),
+}
+
+fn replacer_name(identifier: &str) -> Option<&str> {
+  identifier.strip_prefix('%')?.split(':').next()
+}
+
+fn is_wildcard_reference(identifier: &str) -> bool {
+  matches!(replacer_name(identifier), Some("word" | "any"))
+}
+
+fn is_translatable_wildcard(identifier: &str) -> bool {
+  is_wildcard_reference(identifier)
+}
+
+fn is_wildcard_token(token: &Token) -> bool {
+  matches!(token, Token::Reference(reference) if is_wildcard_reference(reference))
+}
+
+fn compose_translation(tokens: &Tokens, children: &IndexMap<String, ResultTree>, identifier: &str) -> String {
+  let mut translated = String::new();
+  for token in tokens {
+    match token {
+      Token::Literal(literal) => translated.push_str(literal),
+      Token::Reference(reference) => {
+        let child = children.get(reference).unwrap_or_else(|| {
+          panic!("translated reference {reference:?} should exist in children for ruleset {identifier:?}")
+        });
+        translated.push_str(&child.translated);
+      }
+    }
+  }
+  translated
+}
+
+fn validate_wildcard_layout(tokens: &Tokens) -> Result<()> {
+  for (index, token) in tokens.iter().enumerate() {
+    let Token::Reference(reference) = token else {
+      continue;
+    };
+    let Some(name @ ("word" | "any")) = replacer_name(reference) else {
+      continue;
+    };
+    let next = tokens.get(index + 1);
+    if matches!(next, Some(Token::Reference(next_reference)) if is_wildcard_reference(next_reference)) {
+      return Err(anyhow!(
+        "adjacent %{name} and wildcard references require a non-empty literal boundary"
+      ));
+    }
+    if name == "any" && next.is_some() && !matches!(next, Some(Token::Literal(literal)) if !literal.is_empty()) {
+      return Err(anyhow!(
+        "%any must be terminal or immediately followed by a non-empty literal boundary"
+      ));
+    }
+  }
+  Ok(())
 }
 
 // Regex for splitting tokens
@@ -529,6 +679,7 @@ pub struct RuleNode {
 pub struct Context {
   pub identifier_path: Vec<String>,
   pub cyclic_rules: BTreeSet<RuleNode>,
+  capture_cache: HashMap<(String, usize), Option<String>>,
 }
 
 // A candidate during token matching
@@ -561,6 +712,10 @@ pub struct ResultTree {
   pub remaining: String,
   // The child result trees for referenced rulesets
   pub children: IndexMap<String, ResultTree>,
+  // Tokens used to rank the specificity of wildcard rules
+  match_tokens: Tokens,
+  // Tokens used to rebuild the translation after wildcard captures are resolved
+  translation_tokens: Tokens,
 }
 
 impl ResultTree {
@@ -576,6 +731,36 @@ impl ResultTree {
     weight
   }
 
+  fn specificity(&self) -> (usize, Reverse<usize>, usize, usize, usize, Reverse<usize>) {
+    let mut any = usize::from(matches!(replacer_name(&self.identifier), Some("any")));
+    let mut word = usize::from(matches!(replacer_name(&self.identifier), Some("word")));
+    let mut legacy_weight = usize::from(!self.matched.is_empty());
+    let mut literal_bytes = self
+      .match_tokens
+      .iter()
+      .filter_map(|token| match token {
+        Token::Literal(literal) => Some(literal.len()),
+        Token::Reference(_) => None,
+      })
+      .sum::<usize>();
+    for child in self.children.values() {
+      let child_score = child.specificity();
+      literal_bytes += child_score.1.0;
+      any += child_score.2;
+      word += child_score.3;
+      legacy_weight += child_score.4;
+    }
+    let has_wildcard = any + word > 0;
+    (
+      usize::from(has_wildcard),
+      Reverse(if has_wildcard { literal_bytes } else { 0 }),
+      any,
+      word,
+      legacy_weight,
+      Reverse(self.matched.len()),
+    )
+  }
+
   // Create a new ResultTree
   fn new(
     identifier: String,
@@ -584,6 +769,8 @@ impl ResultTree {
     translated: String,
     remaining: String,
     children: IndexMap<String, ResultTree>,
+    match_tokens: Tokens,
+    translation_tokens: Tokens,
   ) -> Self {
     Self {
       identifier,
@@ -592,6 +779,8 @@ impl ResultTree {
       translated,
       remaining,
       children,
+      match_tokens,
+      translation_tokens,
     }
   }
 }

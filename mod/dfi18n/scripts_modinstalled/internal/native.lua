@@ -34,6 +34,7 @@ async_translate = lib_function("async_translate")
 is_enabled = lib_function("is_enabled")
 cloud_enable = lib_function("cloud_enable")
 cloud_disable = lib_function("cloud_disable")
+cloud_get_status = lib_function("cloud_get_status")
 cloud_set_endpoint = lib_function("cloud_set_endpoint")
 dfhack_addstr_flag = lib_function("dfhack_addstr_flag")
 

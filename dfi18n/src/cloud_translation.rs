@@ -57,8 +57,11 @@ impl Config {
   }
 
   fn is_ready(&self) -> bool {
-    let supported_endpoint = self.endpoint.starts_with("https://") || self.endpoint.starts_with("http://");
-    self.enabled && supported_endpoint
+    self.enabled && self.has_supported_endpoint()
+  }
+
+  fn has_supported_endpoint(&self) -> bool {
+    self.endpoint.starts_with("https://") || self.endpoint.starts_with("http://")
   }
 }
 
@@ -124,21 +127,39 @@ pub fn reload() {
 }
 
 fn set_enabled(enabled: bool) {
-  let mut state = state().write().unwrap();
-  if state.config.enabled == enabled {
+  let (current, config_path, endpoint_supported) = {
+    let state = state().read().unwrap();
+    (
+      state.config.enabled,
+      state.config_path.clone(),
+      state.config.has_supported_endpoint(),
+    )
+  };
+
+  if enabled && !endpoint_supported {
+    log::warn!("cloud translation cannot be enabled without an HTTP(S) endpoint");
+    return;
+  }
+  if current == enabled {
     return;
   }
 
+  let Some(config_path) = config_path else {
+    log::warn!("cloud translation configuration has not been loaded");
+    return;
+  };
+  if let Err(error) = write_enabled(&config_path, enabled) {
+    log::warn!("failed to persist cloud translation state: {error:#}");
+    return;
+  }
+
+  let mut state = state().write().unwrap();
   state.config.enabled = enabled;
   state.cache.clear();
   state.generation = state.generation.wrapping_add(1);
 
   if enabled {
-    if state.config.is_ready() {
-      log::info!("cloud translation enabled");
-    } else {
-      log::warn!("cloud translation cannot be enabled without an HTTP(S) endpoint");
-    }
+    log::info!("cloud translation enabled");
   } else {
     log::info!("cloud translation disabled");
   }
@@ -152,6 +173,14 @@ extern "C" fn cloud_enable() {
 #[unsafe(no_mangle)]
 extern "C" fn cloud_disable() {
   set_enabled(false);
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn cloud_get_status(lua_state: *mut std::ffi::c_void) -> i32 {
+  let state = state().read().unwrap();
+  lua::push_boolean(lua_state, state.config.enabled);
+  lua::push_boolean(lua_state, state.config.has_supported_endpoint());
+  2
 }
 
 fn normalize_endpoint(input: &str) -> Result<String> {
@@ -197,6 +226,29 @@ fn write_endpoint(path: &Path, endpoint: &str) -> Result<()> {
     .collect();
   if !replaced {
     lines.push(format!("endpoint = {encoded}"));
+  }
+  std::fs::write(path, lines.join(newline) + newline).with_context(|| format!("failed to write {path:?}"))
+}
+
+fn write_enabled(path: &Path, enabled: bool) -> Result<()> {
+  let contents = std::fs::read_to_string(path).with_context(|| format!("failed to read {path:?}"))?;
+  let newline = if contents.contains("\r\n") { "\r\n" } else { "\n" };
+  let mut replaced = false;
+  let mut lines: Vec<String> = contents
+    .lines()
+    .map(|line| {
+      let trimmed = line.trim_start();
+      let is_enabled = trimmed.strip_prefix("enabled").is_some_and(|remaining| remaining.trim_start().starts_with('='));
+      if is_enabled {
+        replaced = true;
+        format!("enabled = {enabled}")
+      } else {
+        line.to_owned()
+      }
+    })
+    .collect();
+  if !replaced {
+    lines.insert(0, format!("enabled = {enabled}"));
   }
   std::fs::write(path, lines.join(newline) + newline).with_context(|| format!("failed to write {path:?}"))
 }
@@ -442,6 +494,28 @@ mod tests {
     assert_eq!(
       parsed.get("endpoint").and_then(toml::Value::as_str),
       Some("https://translate.example.com/v1/translate")
+    );
+    assert_eq!(parsed.get("min_words").and_then(toml::Value::as_integer), Some(3));
+
+    std::fs::remove_file(path).unwrap();
+  }
+
+  #[test]
+  fn persists_enabled_state_without_rewriting_the_rest_of_the_config() {
+    let path = std::env::temp_dir().join(format!("dfi18n-cloud-enabled-config-{}.toml", std::process::id()));
+    std::fs::write(
+      &path,
+      "enabled = false\nendpoint = \"https://example.com/v1/translate\"\nmin_words = 3\n",
+    )
+    .unwrap();
+
+    write_enabled(&path, true).unwrap();
+    let contents = std::fs::read_to_string(&path).unwrap();
+    let parsed: toml::Value = toml::from_str(&contents).unwrap();
+    assert_eq!(parsed.get("enabled").and_then(toml::Value::as_bool), Some(true));
+    assert_eq!(
+      parsed.get("endpoint").and_then(toml::Value::as_str),
+      Some("https://example.com/v1/translate")
     );
     assert_eq!(parsed.get("min_words").and_then(toml::Value::as_integer), Some(3));
 
